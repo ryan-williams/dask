@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import io
+import pickle
 
 import pytest
 
@@ -405,6 +406,8 @@ def test_to_sql(npartitions):
     # Verify number of partitions returned, when compute=False
     with tmp_db_uri() as uri:
         result = ddf.to_sql("test", uri, compute=False,)
+
+        pickle.dumps(result)
 
         # the first result is from the "meta" insert
         actual = len(result.compute()) - 1
