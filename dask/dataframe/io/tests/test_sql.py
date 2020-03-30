@@ -413,6 +413,7 @@ def test_to_sql(distributed, npartitions):
 
             # the first result is from the "meta" insert
             actual = len(result.compute()) - 1
+
             assert actual == npartitions
 
 
