@@ -1,4 +1,6 @@
 import operator
+from typing import Union
+from sqlalchemy.engine import Engine
 import warnings
 from collections.abc import Iterator, Sequence
 from functools import wraps, partial
@@ -1351,7 +1353,7 @@ Dask Name: {name}, {task} tasks"""
     def to_sql(
         self,
         name: str,
-        uri: str,
+        uri: Union[Engine, str],
         schema=None,
         if_exists: str = "fail",
         index: bool = True,
