@@ -1,4 +1,10 @@
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
+
+try:
+    from contextlib import nullcontext
+except ImportError:
+    from contextlib import suppress as nullcontext
+
 import io
 
 import pytest
