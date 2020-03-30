@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from sqlalchemy.engine import Engine
+from typing import Union
 
 import dask
 from dask.dataframe.utils import PANDAS_GT_0240
@@ -9,7 +11,7 @@ from ... import delayed
 
 def read_sql_table(
     table,
-    uri,
+    engine: Union[Engine, str],
     index_col,
     divisions=None,
     npartitions=None,
@@ -33,8 +35,11 @@ def read_sql_table(
     ----------
     table : string or sqlalchemy expression
         Select columns from here.
-    uri : string
-        Full sqlalchemy URI for the database connection
+    engine : sqlalchemy.engine.Engine or str
+        SQLAlchemy Engine or DB URI.
+        Using SQLAlchemy makes it possible to use any DB supported by that library.
+        If passing an Engine, the user is responsible for engine disposal; see \
+            <https://docs.sqlalchemy.org/en/13/core/connections.html>`_.
     index_col : string
         Column which becomes the index, and defines the partitioning. Should
         be a indexed column in the SQL server, and any orderable type. If the
@@ -104,7 +109,18 @@ def read_sql_table(
     if index_col is None:
         raise ValueError("Must specify index column to partition on")
     engine_kwargs = {} if engine_kwargs is None else engine_kwargs
-    engine = sa.create_engine(uri, **engine_kwargs)
+    if isinstance(engine, str):
+        uri = engine
+        engine = sa.create_engine(uri, **engine_kwargs)
+        dispose_engine = True
+    elif isinstance(engine, Engine):
+        uri = str(engine.url)
+        dispose_engine = False
+        if engine_kwargs:
+            raise ValueError("SQLAlchemy Engine and engine_kwargs both passed in")
+    else:
+        raise ValueError("Invalid DB engine: %s" % engine)
+
     m = sa.MetaData()
     if isinstance(table, str):
         table = sa.Table(table, m, autoload=True, autoload_with=engine, schema=schema)
@@ -142,7 +158,7 @@ def read_sql_table(
             # no results at all
             name = table.name
             schema = table.schema
-            head = pd.read_sql_table(name, uri, schema=schema, index_col=index_col)
+            head = pd.read_sql_table(name, engine, schema=schema, index_col=index_col)
             return from_pandas(head, npartitions=1)
 
         bytes_per_row = (head.memory_usage(deep=True, index=True)).sum() / head_rows
@@ -197,7 +213,8 @@ def read_sql_table(
             )
         )
 
-    engine.dispose()
+    if dispose_engine:
+        engine.dispose()
 
     return from_delayed(parts, meta, divisions=divisions)
 
@@ -218,7 +235,7 @@ def _read_sql_chunk(q, uri, meta, engine_kwargs=None, **kwargs):
 def to_sql(
     df,
     name: str,
-    uri: str,
+    uri: Union[Engine, str],
     schema=None,
     if_exists: str = "fail",
     index: bool = True,
@@ -241,8 +258,12 @@ def to_sql(
     ----------
     name : str
         Name of SQL table.
-    uri : string
-        Full sqlalchemy URI for the database connection
+    uri : sqlalchemy.engine.Engine or str
+        SQLAlchemy DB URI (or Engine, which the URI is extracted from). All DB interactions in this function are
+        delayed, so only the URI is used (it is serialized and sent to workers; Engines are not serializable).
+        Using SQLAlchemy makes it possible to use any DB supported by that library.
+        If passing an Engine, the user is responsible for engine disposal; see \
+            <https://docs.sqlalchemy.org/en/13/core/connections.html>`_.
     schema : str, optional
         Specify the schema (if database flavor supports this). If None, use
         default schema.
@@ -343,6 +364,13 @@ def to_sql(
             raise ValueError(
                 "Invalid kwargs: %s" % ",".join([k for k in kwargs.keys()])
             )
+
+    if isinstance(uri, Engine):
+        uri = str(uri.url)
+    elif isinstance(uri, str):
+        uri = uri
+    else:
+        raise ValueError("Invalid DB `con`: %s" % uri)
 
     # This is the only argument we add on top of what Pandas supports
     kwargs = dict(
