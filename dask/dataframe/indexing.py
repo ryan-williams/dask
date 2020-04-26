@@ -42,6 +42,9 @@ class _iLocIndexer(_IndexerBase):
 
     def __getitem__(self, key):
 
+        if isinstance(key, slice) and key == slice(None):
+            key = (slice(None), slice(None))
+
         # dataframe
         msg = (
             "'DataFrame.iloc' only supports selecting columns. "
