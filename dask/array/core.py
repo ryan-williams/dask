@@ -4374,7 +4374,11 @@ def concatenate3(arrays):
         if hasattr(arr, "ndim"):
             while arr.ndim < ndim:
                 arr = arr[None, ...]
-        result[idx] = arr
+
+        try:
+            result[idx] = arr
+        except ValueError as e:
+            raise ValueError(f'outer shape {shape}, idx {idx} ({type(idx)}), arr {arr} (type {type(arr)}, shape {arr.shape})')
 
     return result
 
