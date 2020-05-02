@@ -1,3 +1,4 @@
+.eggs
 .hypothesis
 *.py[cod]
 __pycache__/
