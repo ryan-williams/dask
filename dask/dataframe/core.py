@@ -300,7 +300,7 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         self._len = None
 
         if partition_sizes:
-            assert len(partition_sizes) == len(divisions)
+            assert len(partition_sizes) + 1 == len(divisions)
         self.partition_sizes = partition_sizes
 
     def __dask_graph__(self):
@@ -2977,7 +2977,7 @@ Dask Name: {name}, {task} tasks""".format(
         else:
             meta = make_meta(meta, index=getattr(make_meta(self), "index", None))
 
-        return Series(graph, name, meta, self.divisions)
+        return Series(graph, name, meta, self.divisions, self.partition_sizes)
 
     @derived_from(pd.Series)
     def dropna(self):
@@ -3143,9 +3143,11 @@ Dask Name: {name}, {task} tasks""".format(
             )
             warnings.warn(meta_warning(meta))
 
-        return map_partitions(
+        mapped = map_partitions(
             M.apply, self, func, convert_dtype, args, meta=meta, **kwds
         )
+        mapped.partition_sizes = self.partition_sizes
+        return mapped
 
     @derived_from(pd.Series)
     def cov(self, other, min_periods=None, split_every=False):

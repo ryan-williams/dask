@@ -203,6 +203,17 @@ def test_attributes():
     pytest.raises(AttributeError, lambda: df.foo)
 
 
+def test_partition_sizes():
+    df = dd.from_pandas(pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ]), npartitions=3)
+    assert df.partition_sizes == [34,34,32]
+    df["len"] = df.i.map(len)
+    assert df.partition_sizes == [34,34,32]
+    assert df['len'].partition_sizes == [34,34,32]
+    assert df['i'].partition_sizes == [34,34,32]
+    assert len(df.compute()) == 100
+    assert [ len(partition.compute(scheduler='single-threaded')) for partition in df.partitions ] == [34,34,32]
+
+
 def test_column_names():
     tm.assert_index_equal(d.columns, pd.Index(["a", "b"]))
     tm.assert_index_equal(d[["b", "a"]].columns, pd.Index(["b", "a"]))

@@ -199,11 +199,13 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
         locations = list(range(0, nrows, chunksize)) + [len(data)]
         divisions = [None] * len(locations)
 
+    partition_bounds = list(zip(locations[:-1], locations[1:]))
+    partition_sizes = [ stop-start for start, stop in partition_bounds ]
     dsk = {
         (name, i): data.iloc[start:stop]
-        for i, (start, stop) in enumerate(zip(locations[:-1], locations[1:]))
+        for i, (start, stop) in enumerate(partition_bounds)
     }
-    return new_dd_object(dsk, name, data, divisions)
+    return new_dd_object(dsk, name, data, divisions, partition_sizes)
 
 
 def from_bcolz(x, chunksize=None, categorize=True, index=None, lock=lock, **kwargs):
