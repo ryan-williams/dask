@@ -20,3 +20,4 @@ hdfs-initialized-indicator
 .ipynb_checkpoints
 mydask.png
 .vscode/
+env/
