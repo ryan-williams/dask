@@ -527,6 +527,8 @@ Dask Name: {name}, {task} tasks"""
         )
 
     def __len__(self):
+        if hasattr(self, "_len"):
+            return self._len
         return self.reduction(
             len, np.sum, token="len", meta=int, split_every=False
         ).compute()
@@ -3342,6 +3344,8 @@ class DataFrame(_Frame):
         return _iLocIndexer(self)
 
     def __len__(self):
+        if hasattr(self, "_len"):
+            return self._len
         try:
             s = self[self.columns[0]]
         except IndexError:
