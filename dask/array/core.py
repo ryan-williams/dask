@@ -1770,7 +1770,7 @@ class Array(DaskMethodsMixin):
 
     @property
     def A(self):
-        return self
+        return self.map_blocks(lambda block: block.A, dtype=self.dtype)
 
     @property
     def T(self):
