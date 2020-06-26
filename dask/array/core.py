@@ -1152,7 +1152,11 @@ class Array(DaskMethodsMixin):
 
             c.append(tuple(chunk_shapes[s]))
 
-        x._chunks = compute(tuple(c))[0]
+        # `map_blocks` assigns numpy dtypes
+        # cast chunk dimensions back to python int before returning
+        x._chunks = tuple(
+            [tuple([int(chunk) for chunk in chunks]) for chunks in compute(tuple(c))[0]]
+        )
         return x
 
     @property
@@ -1430,7 +1434,7 @@ class Array(DaskMethodsMixin):
         """
         return to_hdf5(filename, datapath, self, **kwargs)
 
-    def to_dask_dataframe(self, columns=None, index=None):
+    def to_dask_dataframe(self, columns=None, index=None, meta=None):
         """ Convert dask Array to dask Dataframe
 
         Parameters
@@ -1448,6 +1452,10 @@ class Array(DaskMethodsMixin):
             Specifying ``index`` can be useful if you're conforming a Dask Array
             to an existing dask Series or DataFrame, and you would like the
             indices to match.
+        meta : object, optional
+            An optional `meta` parameter can be passed for dask
+            to specify the concrete dataframe type to use for partitions of
+            the Dask dataframe. By default, pandas DataFrame is used.
 
         See Also
         --------
@@ -1455,7 +1463,7 @@ class Array(DaskMethodsMixin):
         """
         from ..dataframe import from_dask_array
 
-        return from_dask_array(self, columns=columns, index=index)
+        return from_dask_array(self, columns=columns, index=index, meta=meta)
 
     def __bool__(self):
         if self.size > 1:
@@ -2164,7 +2172,9 @@ class Array(DaskMethodsMixin):
         """
         from .overlap import map_overlap
 
-        return map_overlap(self, func, depth, boundary, trim, **kwargs)
+        return map_overlap(
+            func, self, depth=depth, boundary=boundary, trim=trim, **kwargs
+        )
 
     @derived_from(np.ndarray)
     def cumsum(self, axis, dtype=None, out=None):
@@ -2590,7 +2600,6 @@ def auto_chunks(chunks, shape, limit, dtype, previous_chunks=None):
         )
         last_multiplier = 0
         last_autos = set()
-
         while (
             multiplier != last_multiplier or autos != last_autos
         ):  # while things change
@@ -4216,12 +4225,23 @@ def transposelist(arrays, axes, extradims=0):
     return reshapelist(newshape, result)
 
 
-def stack(seq, axis=0):
+def stack(seq, axis=0, allow_unknown_chunksizes=False):
     """
     Stack arrays along a new axis
 
     Given a sequence of dask arrays, form a new dask array by stacking them
     along a new dimension (axis=0 by default)
+
+     Parameters
+    ----------
+    seq: list of dask.arrays
+    axis: int
+        Dimension along which to align all of the arrays
+    allow_unknown_chunksizes: bool
+        Allow unknown chunksizes, such as come from converting from dask
+        dataframes.  Dask.array is unable to verify that chunks line up.  If
+        data comes from differently aligned sources then this can cause
+        unexpected results.
 
     Examples
     --------
@@ -4256,14 +4276,12 @@ def stack(seq, axis=0):
 
     if not seq:
         raise ValueError("Need array(s) to stack")
-    if not all(x.shape == seq[0].shape for x in seq):
-        idx = np.where(np.asanyarray([x.shape for x in seq]) != seq[0].shape)[0]
+    if not allow_unknown_chunksizes and not all(x.shape == seq[0].shape for x in seq):
+        idx = first(i for i in enumerate(seq) if i[1].shape != seq[0].shape)
         raise ValueError(
             "Stacked arrays must have the same shape. "
-            "The first {0} had shape {1}, while array "
-            "{2} has shape {3}".format(
-                idx[0], seq[0].shape, idx[0] + 1, seq[idx[0]].shape
-            )
+            "The first array had shape {0}, while array "
+            "{1} has shape {2}.".format(seq[0].shape, idx[0] + 1, idx[1].shape)
         )
 
     meta = np.stack([meta_from_array(a) for a in seq], axis=axis)
@@ -4541,13 +4559,13 @@ def _vindex_array(x, dict_indexes):
 
     try:
         broadcast_indexes = np.broadcast_arrays(*dict_indexes.values())
-    except ValueError:
+    except ValueError as e:
         # note: error message exactly matches numpy
         shapes_str = " ".join(str(a.shape) for a in dict_indexes.values())
         raise IndexError(
             "shape mismatch: indexing arrays could not be "
             "broadcast together with shapes " + shapes_str
-        )
+        ) from e
     broadcast_shape = broadcast_indexes[0].shape
 
     lookup = dict(zip(dict_indexes, broadcast_indexes))
