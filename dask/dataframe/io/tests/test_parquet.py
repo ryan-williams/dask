@@ -1,4 +1,5 @@
 import os
+import sys
 import warnings
 from distutils.version import LooseVersion
 
@@ -43,8 +44,12 @@ if pq and pa.__version__ < LooseVersion("0.13.1"):
     SKIP_PYARROW = True
     SKIP_PYARROW_REASON = "pyarrow >= 0.13.1 required for parquet"
 else:
-    SKIP_PYARROW = not pq
-    SKIP_PYARROW_REASON = "pyarrow not found"
+    if sys.platform == "win32" and pa.__version__ == LooseVersion("0.16.0"):
+        SKIP_PYARROW = True
+        SKIP_PYARROW_REASON = "https://github.com/dask/dask/issues/6093"
+    else:
+        SKIP_PYARROW = not pq
+        SKIP_PYARROW_REASON = "pyarrow not found"
 PYARROW_MARK = pytest.mark.skipif(SKIP_PYARROW, reason=SKIP_PYARROW_REASON)
 
 
@@ -661,6 +666,25 @@ def test_partition_on_cats(tmpdir, engine):
     d = dd.from_pandas(d, 2)
     d.to_parquet(tmp, partition_on=["b"], engine=engine)
     df = dd.read_parquet(tmp, engine=engine)
+    assert set(df.b.cat.categories) == {"x", "y", "z"}
+
+
+@pytest.mark.parametrize("meta", [False, True])
+@pytest.mark.parametrize("stats", [False, True])
+def test_partition_on_cats_pyarrow(tmpdir, stats, meta):
+    check_pyarrow()
+
+    tmp = str(tmpdir)
+    d = pd.DataFrame(
+        {
+            "a": np.random.rand(50),
+            "b": np.random.choice(["x", "y", "z"], size=50),
+            "c": np.random.choice(["x", "y", "z"], size=50),
+        }
+    )
+    d = dd.from_pandas(d, 2)
+    d.to_parquet(tmp, partition_on=["b"], engine="pyarrow", write_metadata_file=meta)
+    df = dd.read_parquet(tmp, engine="pyarrow", gather_statistics=stats)
     assert set(df.b.cat.categories) == {"x", "y", "z"}
 
 
@@ -1713,6 +1737,27 @@ def test_writing_parquet_with_unknown_kwargs(tmpdir, engine):
         ddf.to_parquet(fn, engine=engine, unknown_key="unknown_value")
 
 
+def test_to_parquet_with_get(tmpdir):
+    from dask.multiprocessing import get as mp_get
+
+    tmpdir = str(tmpdir)
+
+    flag = [False]
+
+    def my_get(*args, **kwargs):
+        flag[0] = True
+        return mp_get(*args, **kwargs)
+
+    df = pd.DataFrame({"x": ["a", "b", "c", "d"], "y": [1, 2, 3, 4]})
+    ddf = dd.from_pandas(df, npartitions=2)
+
+    ddf.to_parquet(tmpdir, compute_kwargs={"scheduler": my_get})
+    assert flag[0]
+
+    result = dd.read_parquet(os.path.join(tmpdir, "*"))
+    assert_eq(result, df, check_index=False)
+
+
 def test_select_partitioned_column(tmpdir, engine):
     pytest.importorskip("snappy")
     if engine == "pyarrow":
@@ -1910,13 +1955,25 @@ def test_categories_large(tmpdir, engine):
 
 
 @write_read_engines()
-def test_read_glob_nostats(tmpdir, write_engine, read_engine):
+def test_read_glob_no_stats(tmpdir, write_engine, read_engine):
     tmp_path = str(tmpdir)
     ddf.to_parquet(tmp_path, engine=write_engine)
 
     ddf2 = dd.read_parquet(
         os.path.join(tmp_path, "*.parquet"), engine=read_engine, gather_statistics=False
     )
+    assert_eq(ddf, ddf2, check_divisions=False)
+
+
+@write_read_engines()
+def test_read_glob_yes_stats(tmpdir, write_engine, read_engine):
+    tmp_path = str(tmpdir)
+    ddf.to_parquet(tmp_path, engine=write_engine)
+    import glob
+
+    paths = glob.glob(os.path.join(tmp_path, "*.parquet"))
+    paths.append(os.path.join(tmp_path, "_metadata"))
+    ddf2 = dd.read_parquet(paths, engine=read_engine, gather_statistics=False)
     assert_eq(ddf, ddf2, check_divisions=False)
 
 
@@ -2006,6 +2063,40 @@ def test_timeseries_nulls_in_schema_pyarrow(tmpdir, timestamp, numerical):
         check_divisions=False,
         check_index=False,
     )
+
+
+def test_read_inconsistent_schema_pyarrow(tmpdir):
+    check_pyarrow()
+
+    # Note: This is a proxy test for a cudf-related issue fix
+    # (see cudf#5062 github issue).  The cause of that issue is
+    # schema inconsistencies that do not actually correspond to
+    # different types, but whether or not the file/column contains
+    # null values.
+
+    df1 = pd.DataFrame({"id": [0, 1], "val": [10, 20]})
+    df2 = pd.DataFrame({"id": [2, 3], "val": [30, 40]})
+
+    desired_type = "int64"
+    other_type = "int32"
+    df1.val = df1.val.astype(desired_type)
+    df2.val = df2.val.astype(other_type)
+
+    df_expect = pd.concat([df1, df2], ignore_index=True)
+    df_expect["val"] = df_expect.val.astype(desired_type)
+
+    df1.to_parquet(os.path.join(tmpdir, "0.parquet"))
+    df2.to_parquet(os.path.join(tmpdir, "1.parquet"))
+
+    # Read Directory
+    check = dd.read_parquet(str(tmpdir), dataset={"validate_schema": False})
+    assert_eq(check.compute(), df_expect, check_index=False)
+
+    # Read List
+    check = dd.read_parquet(
+        os.path.join(tmpdir, "*.parquet"), dataset={"validate_schema": False}
+    )
+    assert_eq(check.compute(), df_expect, check_index=False)
 
 
 def test_graph_size_pyarrow(tmpdir, engine):
@@ -2329,3 +2420,27 @@ def test_filter_nonpartition_columns(
     df_read = ddf_read.compute()
     assert len(df_read) == len(df_read[df_read["time"] < 5])
     assert df_read["time"].max() < 5
+
+
+def test_pandas_metadata_nullable_pyarrow(tmpdir):
+
+    check_pyarrow()
+    if pa.__version__ < LooseVersion("0.16.0") or pd.__version__ < LooseVersion(
+        "1.0.0"
+    ):
+        pytest.skip("PyArrow>=0.16 and Pandas>=1.0.0 Required.")
+    tmpdir = str(tmpdir)
+
+    ddf1 = dd.from_pandas(
+        pd.DataFrame(
+            {
+                "A": pd.array([1, None, 2], dtype="Int64"),
+                "B": pd.array(["dog", "cat", None], dtype="str"),
+            }
+        ),
+        npartitions=1,
+    )
+    ddf1.to_parquet(tmpdir, engine="pyarrow")
+    ddf2 = dd.read_parquet(tmpdir, engine="pyarrow")
+
+    assert_eq(ddf1, ddf2, check_index=False)
