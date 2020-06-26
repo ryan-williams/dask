@@ -25,6 +25,7 @@ from ._compat import (  # noqa: F401
     PANDAS_GT_0240,
     PANDAS_GT_0250,
     PANDAS_GT_100,
+    PANDAS_GT_110,
     HAS_INT_NA,
     tm,
 )
@@ -190,7 +191,7 @@ def raise_on_meta_error(funcname=None, udf=False):
             "{2}"
         )
         msg = msg.format(" in `{0}`".format(funcname) if funcname else "", repr(e), tb)
-        raise ValueError(msg)
+        raise ValueError(msg) from e
 
 
 UNKNOWN_CATEGORIES = "__UNKNOWN_CATEGORIES__"
@@ -483,7 +484,10 @@ def group_split_pandas(df, c, k, ignore_index=False):
     )
     df2 = df.take(indexer)
     locations = locations.cumsum()
-    parts = [df2.iloc[a:b] for a, b in zip(locations[:-1], locations[1:])]
+    parts = [
+        df2.iloc[a:b].reset_index(drop=True) if ignore_index else df2.iloc[a:b]
+        for a, b in zip(locations[:-1], locations[1:])
+    ]
     return dict(zip(range(k), parts))
 
 

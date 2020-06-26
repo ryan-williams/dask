@@ -189,8 +189,9 @@ def _determine_pf_parts(fs, paths, gather_statistics, **kwargs):
 
 
 class FastParquetEngine(Engine):
-    @staticmethod
+    @classmethod
     def read_metadata(
+        cls,
         fs,
         paths,
         categories=None,
@@ -229,14 +230,13 @@ class FastParquetEngine(Engine):
                 column_index_names,
             ) = _parse_pandas_metadata(json.loads(pandas_md[0]))
             #  auto-ranges should not be created by fastparquet
-            index_names = [n for n in index_names if n is not None]
             column_names.extend(pf.cats)
 
         else:
             raise ValueError("File has multiple entries for 'pandas' metadata")
 
         if index is None and len(index_names) > 0:
-            if len(index_names) == 1:
+            if len(index_names) == 1 and index_names[0] is not None:
                 index = index_names[0]
             else:
                 index = index_names
@@ -436,11 +436,18 @@ class FastParquetEngine(Engine):
             }
             parts.append(part_item)
 
-        return (meta, stats, parts)
+        # Cannot allow `None` in columns if the user has specified index=False
+        if index is False and None in meta.columns:
+            meta.drop(columns=[None], inplace=True)
 
-    @staticmethod
-    def read_partition(fs, piece, columns, index, categories=(), pf=None, **kwargs):
+        return (meta, stats, parts, index)
+
+    @classmethod
+    def read_partition(
+        cls, fs, piece, columns, index, categories=(), pf=None, **kwargs
+    ):
         if isinstance(index, list):
+            index = ["__index_level_0__" if i is None else i for i in index]
             columns += index
 
         if pf is None:
@@ -471,8 +478,9 @@ class FastParquetEngine(Engine):
                 rg_piece, columns, categories, index=index, **kwargs.get("read", {})
             )
 
-    @staticmethod
+    @classmethod
     def initialize_write(
+        cls,
         df,
         fs,
         path,
@@ -551,8 +559,9 @@ class FastParquetEngine(Engine):
 
         return (fmd, i_offset)
 
-    @staticmethod
+    @classmethod
     def write_partition(
+        cls,
         df,
         path,
         fs,
@@ -599,8 +608,8 @@ class FastParquetEngine(Engine):
         else:
             return []
 
-    @staticmethod
-    def write_metadata(parts, fmd, fs, path, append=False, **kwargs):
+    @classmethod
+    def write_metadata(cls, parts, fmd, fs, path, append=False, **kwargs):
         _meta = copy.copy(fmd)
         if parts:
             for rg in parts:

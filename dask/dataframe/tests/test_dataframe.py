@@ -12,7 +12,7 @@ import dask.array as da
 from dask.array.numpy_compat import _numpy_118
 import dask.dataframe as dd
 from dask.dataframe import _compat
-from dask.dataframe._compat import tm, PANDAS_GT_100
+from dask.dataframe._compat import tm, PANDAS_GT_100, PANDAS_GT_110
 from dask.base import compute_as_if_collection
 from dask.utils import put_lines, M
 
@@ -24,6 +24,7 @@ from dask.dataframe.core import (
     has_parallel_type,
     iter_chunks,
     total_mem_usage,
+    is_broadcastable,
 )
 from dask.dataframe import methods
 from dask.dataframe.utils import assert_eq, make_meta, assert_max_deps, PANDAS_VERSION
@@ -1024,6 +1025,33 @@ def test_value_counts():
     assert result._name != result2._name
 
 
+def test_value_counts_not_sorted():
+    df = pd.DataFrame({"x": [1, 2, 1, 3, 3, 1, 4]})
+    ddf = dd.from_pandas(df, npartitions=3)
+    result = ddf.x.value_counts(sort=False)
+    expected = df.x.value_counts(sort=False)
+    assert_eq(result, expected)
+    result2 = ddf.x.value_counts(split_every=2)
+    assert_eq(result2, expected)
+    assert result._name != result2._name
+
+
+def test_value_counts_with_dropna():
+    df = pd.DataFrame({"x": [1, 2, 1, 3, np.nan, 1, 4]})
+    ddf = dd.from_pandas(df, npartitions=3)
+    if not PANDAS_GT_110:
+        with pytest.raises(NotImplementedError, match="dropna is not a valid argument"):
+            ddf.x.value_counts(dropna=False)
+        return
+
+    result = ddf.x.value_counts(dropna=False)
+    expected = df.x.value_counts(dropna=False)
+    assert_eq(result, expected)
+    result2 = ddf.x.value_counts(split_every=2)
+    assert_eq(result2, expected)
+    assert result._name != result2._name
+
+
 def test_unique():
     pdf = pd.DataFrame(
         {
@@ -1090,6 +1118,11 @@ def test_shape():
     result = d.a.shape
     assert_eq(result[0].compute(), len(full.a))
     assert_eq(dd.compute(result)[0], (len(full.a),))
+
+    sh = dd.from_pandas(pd.DataFrame(index=[1, 2, 3]), npartitions=2).shape
+    assert (sh[0].compute(), sh[1]) == (3, 0)
+    sh = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1).shape
+    assert (sh[0].compute(), sh[1]) == (0, 2)
 
 
 def test_nbytes():
@@ -2458,6 +2491,15 @@ def test_gh580():
     ddf = dd.from_pandas(df, 2)
     assert_eq(np.cos(df["x"]), np.cos(ddf["x"]))
     assert_eq(np.cos(df["x"]), np.cos(ddf["x"]))
+
+
+def test_gh6305():
+    df = pd.DataFrame({"x": np.arange(3, dtype=float)})
+    ddf = dd.from_pandas(df, 1)
+    ddf_index_only = ddf.set_index("x")
+    ds = ddf["x"]
+
+    is_broadcastable([ddf_index_only], ds)
 
 
 def test_rename_dict():
@@ -4096,6 +4138,19 @@ def test_meta_error_message():
     assert "Series" in str(info.value)
     assert "DataFrame" in str(info.value)
     assert "pandas" in str(info.value)
+
+
+def test_map_index():
+    df = pd.DataFrame({"x": [1, 2, 3, 4, 5]})
+    ddf = dd.from_pandas(df, npartitions=2)
+    assert ddf.known_divisions is True
+
+    cleared = ddf.index.map(lambda x: x * 10)
+    assert cleared.known_divisions is False
+
+    applied = ddf.index.map(lambda x: x * 10, is_monotonic=True)
+    assert applied.known_divisions is True
+    assert applied.divisions == tuple(x * 10 for x in ddf.divisions)
 
 
 def test_assign_index():

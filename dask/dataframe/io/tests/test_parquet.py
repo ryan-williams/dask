@@ -24,10 +24,8 @@ except ImportError:
 
 try:
     import pyarrow as pa
-
-    check_pa_divs = pa.__version__ >= LooseVersion("0.9.0")
 except ImportError:
-    check_pa_divs = False
+    check_pa_divs = pa = False
 
 
 try:
@@ -44,7 +42,7 @@ if pq and pa.__version__ < LooseVersion("0.13.1"):
     SKIP_PYARROW = True
     SKIP_PYARROW_REASON = "pyarrow >= 0.13.1 required for parquet"
 else:
-    if sys.platform == "win32" and pa.__version__ == LooseVersion("0.16.0"):
+    if sys.platform == "win32" and pa and pa.__version__ == LooseVersion("0.16.0"):
         SKIP_PYARROW = True
         SKIP_PYARROW_REASON = "https://github.com/dask/dask/issues/6093"
     else:
@@ -552,7 +550,6 @@ def test_categorical(tmpdir, write_engine, read_engine):
         assert ddf2.compute().x.cat.categories.tolist() == ["a", "b", "c"]
 
         ddf2.loc[:1000].compute()
-        df.index.name = "index"  # defaults to 'index' in this case
         assert assert_eq(df, ddf2)
 
     # dereference cats
@@ -1026,14 +1023,9 @@ def test_to_parquet_pyarrow_w_inconsistent_schema_by_partition_succeeds_w_manual
             ("partition_column", pa.int64()),
         ]
     )
-    fut = ddf.to_parquet(
-        str(tmpdir),
-        compute=False,
-        engine="pyarrow",
-        partition_on="partition_column",
-        schema=schema,
+    ddf.to_parquet(
+        str(tmpdir), engine="pyarrow", partition_on="partition_column", schema=schema
     )
-    fut.compute(scheduler="single-threaded")
     ddf_after_write = (
         dd.read_parquet(str(tmpdir), engine="pyarrow", gather_statistics=False)
         .compute()
@@ -1238,9 +1230,7 @@ def test_divisions_read_with_filters(tmpdir):
     # save it
     d.to_parquet(tmpdir, write_index=True, partition_on=["a"], engine="fastparquet")
     # read it
-    out = dd.read_parquet(
-        tmpdir, index="index", engine="fastparquet", filters=[("a", "==", "b")]
-    )
+    out = dd.read_parquet(tmpdir, engine="fastparquet", filters=[("a", "==", "b")])
     # test it
     expected_divisions = (25, 49)
     assert out.divisions == expected_divisions
@@ -1738,6 +1728,8 @@ def test_writing_parquet_with_unknown_kwargs(tmpdir, engine):
 
 
 def test_to_parquet_with_get(tmpdir):
+    check_engine()
+
     from dask.multiprocessing import get as mp_get
 
     tmpdir = str(tmpdir)
@@ -2444,3 +2436,141 @@ def test_pandas_metadata_nullable_pyarrow(tmpdir):
     ddf2 = dd.read_parquet(tmpdir, engine="pyarrow")
 
     assert_eq(ddf1, ddf2, check_index=False)
+
+
+def test_pandas_timestamp_overflow_pyarrow(tmpdir):
+
+    check_pyarrow()
+    if pa.__version__ < LooseVersion("0.17.0"):
+        pytest.skip("PyArrow>=0.17 Required.")
+
+    info = np.iinfo(np.dtype("int64"))
+    arr_numeric = np.linspace(
+        start=info.min + 2, stop=info.max, num=1024, dtype="int64"
+    )
+    arr_dates = arr_numeric.astype("datetime64[ms]")
+
+    table = pa.Table.from_arrays([pa.array(arr_dates)], names=["ts"])
+    pa.parquet.write_table(
+        table, f"{tmpdir}/file.parquet", use_deprecated_int96_timestamps=False
+    )
+
+    # This will raise by default due to overflow
+    with pytest.raises(pa.lib.ArrowInvalid) as e:
+        dd.read_parquet(str(tmpdir), engine="pyarrow").compute()
+    assert "out of bounds" in str(e.value)
+
+    from dask.dataframe.io.parquet.arrow import ArrowEngine
+
+    class ArrowEngineWithTimestampClamp(ArrowEngine):
+        @classmethod
+        def clamp_arrow_datetimes(cls, arrow_table: pa.Table) -> pa.Table:
+            """Constrain datetimes to be valid for pandas
+
+            Since pandas works in ns precision and arrow / parquet defaults to ms
+            precision we need to clamp our datetimes to something reasonable"""
+
+            new_columns = []
+            for i, col in enumerate(arrow_table.columns):
+                if pa.types.is_timestamp(col.type) and (
+                    col.type.unit in ("s", "ms", "us")
+                ):
+                    multiplier = {"s": 1_0000_000_000, "ms": 1_000_000, "us": 1_000}[
+                        col.type.unit
+                    ]
+
+                    original_type = col.type
+
+                    series: pd.Series = col.cast(pa.int64()).to_pandas(
+                        types_mapper={pa.int64(): pd.Int64Dtype}
+                    )
+                    info = np.iinfo(np.dtype("int64"))
+                    # constrain data to be within valid ranges
+                    series.clip(
+                        lower=info.min // multiplier + 1,
+                        upper=info.max // multiplier,
+                        inplace=True,
+                    )
+                    new_array = pa.array(series, pa.int64())
+                    new_array = new_array.cast(original_type)
+                    new_columns.append(new_array)
+                else:
+                    new_columns.append(col)
+
+            return pa.Table.from_arrays(new_columns, names=arrow_table.column_names)
+
+        @classmethod
+        def _arrow_table_to_pandas(
+            cls, arrow_table: pa.Table, categories, **kwargs
+        ) -> pd.DataFrame:
+            fixed_arrow_table = cls.clamp_arrow_datetimes(arrow_table)
+            return super()._arrow_table_to_pandas(
+                fixed_arrow_table, categories, **kwargs
+            )
+
+    # this should not fail, but instead produce timestamps that are in the valid range
+    dd.read_parquet(str(tmpdir), engine=ArrowEngineWithTimestampClamp).compute()
+
+
+@write_read_engines_xfail
+def test_partitioned_preserve_index(tmpdir, write_engine, read_engine):
+
+    if write_engine == "pyarrow" and pa.__version__ < LooseVersion("0.15.0"):
+        pytest.skip("PyArrow>=0.15 Required.")
+
+    tmp = str(tmpdir)
+    size = 1_000
+    npartitions = 4
+    b = np.arange(npartitions).repeat(size // npartitions)
+    data = pd.DataFrame(
+        {
+            "myindex": np.arange(size),
+            "A": np.random.random(size=size),
+            "B": pd.Categorical(b),
+        }
+    ).set_index("myindex")
+    data.index.name = None
+    df1 = dd.from_pandas(data, npartitions=npartitions)
+    df1.to_parquet(tmp, partition_on="B", engine=write_engine)
+
+    expect = data[data["B"] == 1]
+    got = dd.read_parquet(tmp, engine=read_engine, filters=[("B", "==", 1)])
+    assert_eq(expect, got)
+
+
+def test_from_pandas_preserve_none_index(tmpdir, engine):
+
+    check_pyarrow()
+    if pa.__version__ < LooseVersion("0.15.0"):
+        pytest.skip("PyArrow>=0.15 Required.")
+
+    fn = str(tmpdir.join("test.parquet"))
+    df = pd.DataFrame({"a": [1, 2], "b": [4, 5], "c": [6, 7]}).set_index("c")
+    df.index.name = None
+    df.to_parquet(fn, engine="pyarrow", index=True)
+
+    expect = pd.read_parquet(fn)
+    got = dd.read_parquet(fn, engine=engine)
+    assert_eq(expect, got)
+
+
+def test_illegal_column_name(tmpdir, engine):
+    # Make sure user is prevented from preserving a "None" index
+    # name if there is already a column using the special `null_name`
+    null_name = "__null_dask_index__"
+    fn = str(tmpdir.join("test.parquet"))
+    df = pd.DataFrame({"x": [1, 2], null_name: [4, 5]}).set_index("x")
+    df.index.name = None
+    ddf = dd.from_pandas(df, npartitions=2)
+
+    # If we don't want to preserve the None index name, the
+    # write should work, but a UserWarning should be raised
+    with pytest.raises(UserWarning) as w:
+        ddf.to_parquet(fn, engine=engine, write_index=False)
+    assert null_name in str(w.value)
+
+    # If we do want to preserve the None index name, should
+    # get a ValueError for having an illegal column name
+    with pytest.raises(ValueError) as e:
+        ddf.to_parquet(fn, engine=engine)
+    assert null_name in str(e.value)

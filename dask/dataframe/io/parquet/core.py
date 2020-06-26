@@ -23,6 +23,8 @@ except (ImportError, AttributeError):
 
 __all__ = ("read_parquet", "to_parquet")
 
+NONE_LABEL = "__null_dask_index__"
+
 # ----------------------------------------------------------------------
 # User API
 
@@ -167,8 +169,9 @@ def read_parquet(
         the second level corresponds to the kwargs that will be passed on to
         the underlying `pyarrow` or `fastparquet` function.
         Supported top-level keys: 'dataset' (for opening a `pyarrow` dataset),
-        'file' (for opening a `fastparquet` `ParquetFile`), and 'read' (for the
-        backend read function)
+        'file' (for opening a `fastparquet` `ParquetFile`), 'read' (for the
+        backend read function), 'arrow_to_pandas' (for controlling the arguments
+        passed to convert from a `pyarrow.Table.to_pandas()`)
 
     Examples
     --------
@@ -222,7 +225,7 @@ def read_parquet(
     if index and isinstance(index, str):
         index = [index]
 
-    meta, statistics, parts = engine.read_metadata(
+    meta, statistics, parts, index = engine.read_metadata(
         fs,
         paths,
         categories=categories,
@@ -232,8 +235,6 @@ def read_parquet(
         split_row_groups=split_row_groups,
         **kwargs
     )
-    if meta.index.name is not None:
-        index = meta.index.name
 
     # Parse dataset statistics from metadata (if available)
     parts, divisions, index, index_in_columns = process_statistics(
@@ -245,12 +246,16 @@ def read_parquet(
     meta, index, columns = set_index_columns(
         meta, index, columns, index_in_columns, auto_index_allowed
     )
+    if meta.index.name == NONE_LABEL:
+        meta.index.name = None
 
     subgraph = ParquetSubgraph(name, engine, fs, meta, columns, index, parts, kwargs)
 
     # Set the index that was previously treated as a column
     if index_in_columns:
         meta = meta.set_index(index)
+        if meta.index.name == NONE_LABEL:
+            meta.index.name = None
 
     if len(divisions) < 2:
         # empty dataframe - just use meta
@@ -274,7 +279,10 @@ def read_parquet_part(func, fs, meta, part, columns, index, kwargs):
         df.columns.name = meta.columns.name
     columns = columns or []
     index = index or []
-    return df[[c for c in columns if c not in index]]
+    df = df[[c for c in columns if c not in index]]
+    if index == [NONE_LABEL]:
+        df.index.name = None
+    return df
 
 
 def to_parquet(
@@ -380,12 +388,22 @@ def to_parquet(
     if division_info["name"] is None:
         # As of 0.24.2, pandas will rename an index with name=None
         # when df.reset_index() is called.  The default name is "index",
-        # (or "level_0" if "index" is already a column name)
-        division_info["name"] = "index" if "index" not in df.columns else "level_0"
+        # but dask will always change the name to the NONE_LABEL constant
+        if NONE_LABEL not in df.columns:
+            division_info["name"] = NONE_LABEL
+        elif write_index:
+            raise ValueError(
+                "Index must have a name if __null_dask_index__ is a column."
+            )
+        else:
+            warnings.warn(
+                "If read back by Dask, column named __null_dask_index__ "
+                "will be set to the index (and renamed to None)."
+            )
 
     # If write_index==True (default), reset the index and record the
-    # name of the original index in `index_cols` (will be `index` if None,
-    # or `level_0` if `index` is already a column name).
+    # name of the original index in `index_cols` (we will set the name
+    # to the NONE_LABEL constant if it is originally `None`).
     # `fastparquet` will use `index_cols` to specify the index column(s)
     # in the metadata.  `pyarrow` will revert the `reset_index` call
     # below if `index_cols` is populated (because pyarrow will want to handle
@@ -394,7 +412,10 @@ def to_parquet(
     index_cols = []
     if write_index:
         real_cols = set(df.columns)
+        none_index = list(df._meta.index.names) == [None]
         df = df.reset_index()
+        if none_index:
+            df.columns = [c if c != "index" else NONE_LABEL for c in df.columns]
         index_cols = [c for c in set(df.columns).difference(real_cols)]
     else:
         # Not writing index - might as well drop it
@@ -677,9 +698,9 @@ def process_statistics(parts, statistics, filters, index, chunksize):
             elif index != [out[0]["name"]]:
                 raise ValueError("Specified index is invalid.\nindex: {}".format(index))
         elif index is not False and len(out) > 1:
-            if any(o["name"] == "index" for o in out):
-                # Use sorted column named "index" as the index
-                [o] = [o for o in out if o["name"] == "index"]
+            if any(o["name"] == NONE_LABEL for o in out):
+                # Use sorted column maching NONE_LABEL as the index
+                [o] = [o for o in out if o["name"] == NONE_LABEL]
                 divisions = o["divisions"]
                 if index is None:
                     index = [o["name"]]
