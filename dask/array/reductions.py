@@ -284,6 +284,23 @@ def partial_reduce(
         tuple(1 for p in partition_all(split_every[i], c)) if i in split_every else c
         for (i, c) in enumerate(x.chunks)
     ]
+
+    try:
+        import numpy as np
+        if isinstance(reduced_meta, np.matrix) and len(split_every) == 1:
+            print(f'Forcing keepdims=True for np.matrix.sum(axis={",".join([str(k) for k in split_every.keys()])})')
+            keepdims = True
+    except ImportError:
+        pass
+
+    try:
+        from scipy.sparse import spmatrix
+        if isinstance(reduced_meta, spmatrix) and len(split_every) == 1:
+            print(f'Forcing keepdims=True for scipy.sparse.spmatrix.sum(axis={",".join([str(k) for k in split_every.keys()])})')
+            keepdims = True
+    except ImportError:
+        pass
+
     if not keepdims:
         out_axis = [i for i in range(x.ndim) if i not in split_every]
         getter = lambda k: get(out_axis, k)
