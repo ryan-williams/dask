@@ -1,7 +1,9 @@
+.eggs
 .hypothesis
 *.py[cod]
 __pycache__/
 *.egg-info
+.mypy_cache
 dask-worker-space/
 docs/build
 build/
@@ -19,3 +21,4 @@ hdfs-initialized-indicator
 .ipynb_checkpoints
 mydask.png
 .vscode/
+env/
