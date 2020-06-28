@@ -3185,13 +3185,60 @@ def test_from_delayed_meta():
 
 
 def test_A_property():
+    x = da.ones(5, chunks=(2,))
+    assert x.A is x
+
+
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_A_property_matrix():
     x = da.ones((5,5), chunks=(2,2))
     assert x.A is x
 
-    from numpy import matrix
+    from numpy import array, float64, matrix, ndarray
+
     y = x.map_blocks(matrix)
-    assert y.A is not y
-    assert_eq(y.A, y)
+    assert type(y._meta) is matrix
+    from numpy.testing import assert_array_equal
+    assert_array_equal(y._meta, matrix([], dtype=float64).reshape(0,0))
+
+    A = y.A
+    assert A is not y
+    assert_eq(A.compute(), y.compute())
+    assert type(A._meta) is ndarray
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0,0)))
+
+
+@pytest.mark.parametrize("spmatrix", ['csr','csc','coo'])
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_A_property_spmatrix(spmatrix):
+    pytest.importorskip("scipy.sparse")
+
+    x = da.ones((5,5), chunks=(2,2))
+    assert x.A is x
+
+    from numpy import array, float64, ndarray
+
+    from scipy.sparse import csr_matrix, csc_matrix, coo_matrix
+    mat_map = {
+        'csr': csr_matrix,
+        'csc': csc_matrix,
+        'coo': coo_matrix,
+    }
+    mat = mat_map[spmatrix]
+
+    y = x.map_blocks(mat)
+    assert type(y._meta) is mat
+    empty = mat([], dtype=float64).reshape(0,0)
+    assert (y._meta != empty).nnz == 0
+
+    A = y.A
+    assert A is not y
+    assert_eq(A.compute(), y.compute())
+    assert type(A._meta) is ndarray
+
+    from numpy.testing import assert_array_equal
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0,0)))
+
 
 
 def test_copy_mutate():
