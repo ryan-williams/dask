@@ -3287,8 +3287,13 @@ def test_from_delayed_meta():
 
 
 def test_A_property():
-    x = da.ones(5, chunks=(2,))
+    x = da.ones((5,5), chunks=(2,2))
     assert x.A is x
+
+    from numpy import matrix
+    y = x.map_blocks(matrix)
+    assert y.A is not y
+    assert_eq(y.A, y)
 
 
 def test_copy_mutate():
