@@ -287,7 +287,6 @@ def partial_reduce(
     try:
         import numpy as np
         if isinstance(reduced_meta, np.matrix) and len(split_every) == 1:
-            print(f'Forcing keepdims=True for np.matrix.sum(axis={",".join([str(k) for k in split_every.keys()])})')
             keepdims = True
     except ImportError:
         pass
@@ -295,7 +294,6 @@ def partial_reduce(
     try:
         from scipy.sparse import spmatrix
         if isinstance(reduced_meta, spmatrix) and len(split_every) == 1:
-            print(f'Forcing keepdims=True for scipy.sparse.spmatrix.sum(axis={",".join([str(k) for k in split_every.keys()])})')
             keepdims = True
     except ImportError:
         pass
