@@ -1,0 +1,5 @@
+*
+!dask
+!sum-crash.*
+!sum-patched.*
+!sum-test-*.*
