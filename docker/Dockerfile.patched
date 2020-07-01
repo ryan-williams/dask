@@ -1,33 +1,9 @@
-ARG dask_version=2.16.0
-FROM runsascoded/dask-clone:"$dask_version"
-
-USER root
-RUN apt-get install -y libblas3 liblapack3 liblapack-dev libblas-dev gfortran
-
-WORKDIR /
-RUN git clone https://github.com/celsiustx/numpy.git
-WORKDIR numpy
-RUN git checkout origin/keepdims
-RUN pip install -e .
-RUN pip install pytest
-RUN python runtests.py
-
-WORKDIR /
-RUN git clone https://github.com/celsiustx/scipy.git
-WORKDIR scipy
-RUN git checkout origin/keepdims
-RUN pip install -e .
-RUN python runtests.py
-
-USER user
-ENV HOME /home/user
-
-WORKDIR $HOME/dask
-RUN pip install -e .[complete] pyarrow==0.17.1 numba==0.48.0
-RUN pytest -v
+ARG from=runsascoded/dask:sumfix
+FROM $from
 
 RUN pip install papermill ipykernel jupyter
-RUN python -m ipykernel install --user --name 3.8.2
+ARG kernel=3.7.7
+RUN python -m ipykernel install --user --name $kernel
 ADD sum-test-matrix.ipynb sum-test-sparse.ipynb ./
 ADD sum-patched.sh ./
-ENTRYPOINT ["./sum-patched.sh"]
+ENTRYPOINT [ "./sum-patched.sh" ]

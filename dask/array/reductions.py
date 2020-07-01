@@ -284,6 +284,9 @@ def partial_reduce(
         for (i, c) in enumerate(x.chunks)
     ]
 
+    # Mimicking np.matrix and scipy.sparse.spmatrix's non-Dask behavior: they require
+    # that their instances be 2-D, strive to return the an instance of themselves from
+    # operations like `sum`, and so effectively have keepdims=True when axis=0 or axis=1.
     try:
         import numpy as np
         if isinstance(reduced_meta, np.matrix) and len(split_every) == 1:
