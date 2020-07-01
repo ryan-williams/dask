@@ -1771,11 +1771,9 @@ class Array(DaskMethodsMixin):
     @property
     def A(self):
         if type(self._meta) is np.ndarray:
-            print('skipping .A')
             return self
         else:
             # numpy.matrix, scipy.sparse.spmatrix, …
-            print('mapping .A')
             return self.map_blocks(lambda block: block.A, dtype=self.dtype)
 
     @property
