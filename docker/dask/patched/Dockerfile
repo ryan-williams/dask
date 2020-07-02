@@ -1,5 +1,6 @@
-ARG from=runsascoded/dask:sumfix
-FROM $from
+ARG organization=runsascoded
+ARG tag=sum-mat
+FROM $organization/dask/build:$tag
 
 RUN pip install papermill ipykernel jupyter
 ARG kernel=3.7.7
