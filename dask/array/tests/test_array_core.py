@@ -4183,6 +4183,34 @@ def test_scipy_sparse_concatenate(axis, stack, spmatrix):
     assert (zz != z_expected).nnz == 0
 
 
+#@pytest.mark.parametrize("axis", [0, 1, None])
+#def test_scipy_sparse_sum(axis):
+def test_scipy_sparse_sum():
+    pytest.importorskip("scipy.sparse")
+    from scipy.sparse import coo_matrix, csr_matrix, random
+
+    spmat = random(100, 100, format='csr')
+    assert isinstance(spmat, csr_matrix)
+
+    x = da.from_array(spmat, chunks=(20,10), asarray=False)
+
+    xx = x.compute()
+    assert isinstance(xx, coo_matrix)
+    assert (spmat != xx).nnz == 0
+
+    assert x.sum().compute() == spmat.sum()
+
+    # rs = da.random.RandomState(RandomState=np.random.RandomState)
+    #
+    # xs = []
+    # ys = []
+    # for i in range(2):
+    #     x = rs.random((1000, 10), chunks=(100, 5))
+    #     x[x < 0.9] = 0
+    #     xs.append(x)
+    #     ys.append(x.map_blocks(scipy.sparse.csr_matrix))
+
+
 def test_3851():
     with warnings.catch_warnings() as record:
         Y = da.random.random((10, 10), chunks="auto")
