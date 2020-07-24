@@ -447,6 +447,7 @@ Dask Name: {name}, {task} tasks"""
             token=self._name + "-index",
             meta=self._meta.index,
             enforce_metadata=False,
+            preserve_partitions=True,
         )
         if self._len:
             print(f'Propagating size {self._len} to index')
@@ -457,7 +458,7 @@ Dask Name: {name}, {task} tasks"""
     def index(self, value):
         self.divisions = value.divisions
         result = map_partitions(
-            methods.assign_index, self, value, enforce_metadata=False
+            methods.assign_index, self, value, enforce_metadata=False,  # TODO(ryan): partition_sizes
         )
         self.dask = result.dask
         self._name = result._name
