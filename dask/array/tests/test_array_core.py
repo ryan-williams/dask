@@ -3240,6 +3240,58 @@ def test_A_property():
     assert x.A is x
 
 
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_A_property_matrix():
+    x = da.ones((5,5), chunks=(2,2))
+    assert x.A is x
+
+    from numpy import array, float64, matrix, ndarray
+
+    y = x.map_blocks(matrix)
+    assert type(y._meta) is matrix
+    from numpy.testing import assert_array_equal
+    assert_array_equal(y._meta, matrix([], dtype=float64).reshape(0,0))
+
+    A = y.A
+    assert A is not y
+    assert_eq(A.compute(), y.compute())
+    assert type(A._meta) is ndarray
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0,0)))
+
+
+@pytest.mark.parametrize("spmatrix", ['csr','csc','coo'])
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_A_property_spmatrix(spmatrix):
+    pytest.importorskip("scipy.sparse")
+
+    x = da.ones((5,5), chunks=(2,2))
+    assert x.A is x
+
+    from numpy import array, float64, ndarray
+
+    from scipy.sparse import csr_matrix, csc_matrix, coo_matrix
+    mat_map = {
+        'csr': csr_matrix,
+        'csc': csc_matrix,
+        'coo': coo_matrix,
+    }
+    mat = mat_map[spmatrix]
+
+    y = x.map_blocks(mat)
+    assert type(y._meta) is mat
+    empty = mat([], dtype=float64).reshape(0,0)
+    assert (y._meta != empty).nnz == 0
+
+    A = y.A
+    assert A is not y
+    assert_eq(A.compute(), y.compute())
+    assert type(A._meta) is ndarray
+
+    from numpy.testing import assert_array_equal
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0,0)))
+
+
+
 def test_copy_mutate():
     x = da.arange(5, chunks=(2,))
     y = x.copy()
@@ -4106,6 +4158,24 @@ def test_partitions_indexer():
 
 
 @pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_dask_array_holds_numpy_matrix_containers():
+    x = da.random.random((100, 10), chunks=(10, 5))
+    xx = x.compute()
+
+    y = x.map_blocks(np.matrix)
+    yy = y.compute(scheduler="single-threaded")
+
+    assert isinstance(yy, np.matrix)
+    from numpy.testing import assert_array_equal
+    assert_array_equal(yy, xx)
+
+    z = x.T.map_blocks(np.matrix)
+    zz = z.compute(scheduler="single-threaded")
+    assert isinstance(zz, np.matrix)
+    assert_array_equal(zz, xx.T)
+
+
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
 def test_dask_array_holds_scipy_sparse_containers():
     pytest.importorskip("scipy.sparse")
     import scipy.sparse
@@ -4125,12 +4195,12 @@ def test_dask_array_holds_scipy_sparse_containers():
 
     z = x.T.map_blocks(scipy.sparse.csr_matrix)
     zz = z.compute(scheduler="single-threaded")
-    assert isinstance(yy, scipy.sparse.spmatrix)
+    assert isinstance(zz, scipy.sparse.spmatrix)
     assert (zz == xx.T).all()
 
 
-@pytest.mark.parametrize("axis", [0, 1])
-def test_scipy_sparse_concatenate(axis):
+@pytest.mark.parametrize("axis,stack,spmatrix", [(0, 'vstack', 'csr'), (1, 'hstack', 'coo')])
+def test_scipy_sparse_concatenate(axis, stack, spmatrix):
     pytest.importorskip("scipy.sparse")
     import scipy.sparse
 
@@ -4145,15 +4215,23 @@ def test_scipy_sparse_concatenate(axis):
         ys.append(x.map_blocks(scipy.sparse.csr_matrix))
 
     z = da.concatenate(ys, axis=axis)
-    z = z.compute()
+    zz = z.compute()
 
-    if axis == 0:
+    if spmatrix == 'coo':
+        spmatrix = scipy.sparse.coo_matrix
+    else:
+        spmatrix = scipy.sparse.csr_matrix
+
+    assert isinstance(zz, spmatrix)
+
+    if stack == 'vstack':
         sp_concatenate = scipy.sparse.vstack
-    elif axis == 1:
+    else:
         sp_concatenate = scipy.sparse.hstack
+
     z_expected = sp_concatenate([scipy.sparse.csr_matrix(e.compute()) for e in xs])
 
-    assert (z != z_expected).nnz == 0
+    assert (zz != z_expected).nnz == 0
 
 
 def test_3851():

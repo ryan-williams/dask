@@ -1106,10 +1106,8 @@ def concat(
     else:
         if all(df.known_divisions for df in dasks):
             # each DataFrame's division must be greater than previous one
-            if all(
-                dfs[i].divisions[-1] < dfs[i + 1].divisions[0]
-                for i in range(len(dfs) - 1)
-            ):
+            xpr = [dfs[i].divisions[-1] < dfs[i + 1].divisions[0] for i in range(len(dfs) - 1)]
+            if all(xpr):
                 divisions = []
                 for df in dfs[:-1]:
                     # remove last to concatenate with next

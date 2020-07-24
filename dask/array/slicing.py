@@ -891,11 +891,14 @@ def check_index(ind, dimension):
     elif ind is None:
         return
 
-    elif ind >= dimension:
+    import pandas as pd
+    if isinstance(ind, pd.Series):
+        ind = ind.shape[0] - 1
+
+    if ind >= dimension:
         raise IndexError(
             "Index is not smaller than dimension %d >= %d" % (ind, dimension)
         )
-
     elif ind < -dimension:
         msg = "Negative index is not greater than negative dimension %d <= -%d"
         raise IndexError(msg % (ind, dimension))

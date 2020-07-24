@@ -1,0 +1,5 @@
+ARG dask_version
+FROM runsascoded/dask-clone:"$dask_version"
+
+RUN pip install -e .[complete] scipy==1.4.0 pyarrow==0.17.1 numba==0.48.0
+RUN pytest -v

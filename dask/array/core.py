@@ -1511,6 +1511,12 @@ class Array(DaskMethodsMixin):
             )
 
     def __getitem__(self, index):
+        if is_dask_collection(index):
+            # NOTE: This will resolve the index and then use it.
+            # Ideally, if the index is partitioned like this array,
+            # we could apply each partition in the index to each partition in self. -ssmith
+            return self.map_blocks(operator.getitem, index, dtype=self.dtype)
+
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (
             isinstance(index, list) and index and all(isinstance(i, str) for i in index)
@@ -1715,7 +1721,13 @@ class Array(DaskMethodsMixin):
 
     @property
     def A(self):
-        return self
+        if type(self._meta) is np.ndarray:
+            print('skipping .A')
+            return self
+        else:
+            # numpy.matrix, scipy.sparse.spmatrix, …
+            print('mapping .A')
+            return self.map_blocks(lambda block: block.A, dtype=self.dtype)
 
     @property
     def T(self):
