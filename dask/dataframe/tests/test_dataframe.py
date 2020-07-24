@@ -12,7 +12,7 @@ import dask.array as da
 from dask.array.numpy_compat import _numpy_118
 import dask.dataframe as dd
 from dask.dataframe import _compat
-from dask.dataframe._compat import tm, PANDAS_GT_100
+from dask.dataframe._compat import tm, PANDAS_GT_100, PANDAS_GT_110
 from dask.base import compute_as_if_collection
 from dask.utils import put_lines, M
 
@@ -24,6 +24,7 @@ from dask.dataframe.core import (
     has_parallel_type,
     iter_chunks,
     total_mem_usage,
+    is_broadcastable,
 )
 from dask.dataframe import methods
 from dask.dataframe.utils import assert_eq, make_meta, assert_max_deps, PANDAS_VERSION
@@ -918,6 +919,14 @@ def test_map_partitions_keeps_kwargs_readable():
     assert a.x.map_partitions(f, x=5)._name != a.x.map_partitions(f, x=6)._name
 
 
+def test_map_partitions_with_delayed_collection():
+    # https://github.com/dask/dask/issues/5854
+    df = pd.DataFrame(columns=list("abcdefghijk"))
+    ddf = dd.from_pandas(df, 2)
+    ddf.dropna(subset=list("abcdefghijk")).compute()
+    # no error!
+
+
 def test_metadata_inference_single_partition_aligned_args():
     # https://github.com/dask/dask/issues/3034
     # Previously broadcastable series functionality broke this
@@ -1027,6 +1036,33 @@ def test_value_counts():
     assert result._name != result2._name
 
 
+def test_value_counts_not_sorted():
+    df = pd.DataFrame({"x": [1, 2, 1, 3, 3, 1, 4]})
+    ddf = dd.from_pandas(df, npartitions=3)
+    result = ddf.x.value_counts(sort=False)
+    expected = df.x.value_counts(sort=False)
+    assert_eq(result, expected)
+    result2 = ddf.x.value_counts(split_every=2)
+    assert_eq(result2, expected)
+    assert result._name != result2._name
+
+
+def test_value_counts_with_dropna():
+    df = pd.DataFrame({"x": [1, 2, 1, 3, np.nan, 1, 4]})
+    ddf = dd.from_pandas(df, npartitions=3)
+    if not PANDAS_GT_110:
+        with pytest.raises(NotImplementedError, match="dropna is not a valid argument"):
+            ddf.x.value_counts(dropna=False)
+        return
+
+    result = ddf.x.value_counts(dropna=False)
+    expected = df.x.value_counts(dropna=False)
+    assert_eq(result, expected)
+    result2 = ddf.x.value_counts(split_every=2)
+    assert_eq(result2, expected)
+    assert result._name != result2._name
+
+
 def test_unique():
     pdf = pd.DataFrame(
         {
@@ -1040,6 +1076,8 @@ def test_unique():
 
     assert_eq(ddf.x.unique(split_every=2), pd.Series(pdf.x.unique(), name="x"))
     assert_eq(ddf.y.unique(split_every=2), pd.Series(pdf.y.unique(), name="y"))
+    assert_eq(ddf.index.unique(), pdf.index.unique())
+
     assert ddf.x.unique(split_every=2)._name != ddf.x.unique()._name
 
 
@@ -1091,6 +1129,11 @@ def test_shape():
     result = d.a.shape
     assert_eq(result[0].compute(), len(full.a))
     assert_eq(dd.compute(result)[0], (len(full.a),))
+
+    sh = dd.from_pandas(pd.DataFrame(index=[1, 2, 3]), npartitions=2).shape
+    assert (sh[0].compute(), sh[1]) == (3, 0)
+    sh = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1).shape
+    assert (sh[0].compute(), sh[1]) == (0, 2)
 
 
 def test_nbytes():
@@ -1580,6 +1623,7 @@ def test_dataframe_picklable():
 
     cloudpickle = pytest.importorskip("cloudpickle")
     cp_dumps = cloudpickle.dumps
+    cp_loads = cloudpickle.loads
 
     d = _compat.makeTimeDataFrame()
     df = dd.from_pandas(d, npartitions=3)
@@ -1588,25 +1632,25 @@ def test_dataframe_picklable():
     # dataframe
     df2 = loads(dumps(df))
     assert_eq(df, df2)
-    df2 = loads(cp_dumps(df))
+    df2 = cp_loads(cp_dumps(df))
     assert_eq(df, df2)
 
     # series
     a2 = loads(dumps(df.A))
     assert_eq(df.A, a2)
-    a2 = loads(cp_dumps(df.A))
+    a2 = cp_loads(cp_dumps(df.A))
     assert_eq(df.A, a2)
 
     # index
     i2 = loads(dumps(df.index))
     assert_eq(df.index, i2)
-    i2 = loads(cp_dumps(df.index))
+    i2 = cp_loads(cp_dumps(df.index))
     assert_eq(df.index, i2)
 
     # scalar
     # lambdas are present, so only test cloudpickle
     s = df.A.sum()
-    s2 = loads(cp_dumps(s))
+    s2 = cp_loads(cp_dumps(s))
     assert_eq(s, s2)
 
 
@@ -2459,6 +2503,15 @@ def test_gh580():
     ddf = dd.from_pandas(df, 2)
     assert_eq(np.cos(df["x"]), np.cos(ddf["x"]))
     assert_eq(np.cos(df["x"]), np.cos(ddf["x"]))
+
+
+def test_gh6305():
+    df = pd.DataFrame({"x": np.arange(3, dtype=float)})
+    ddf = dd.from_pandas(df, 1)
+    ddf_index_only = ddf.set_index("x")
+    ds = ddf["x"]
+
+    is_broadcastable([ddf_index_only], ds)
 
 
 def test_rename_dict():
@@ -4097,6 +4150,19 @@ def test_meta_error_message():
     assert "Series" in str(info.value)
     assert "DataFrame" in str(info.value)
     assert "pandas" in str(info.value)
+
+
+def test_map_index():
+    df = pd.DataFrame({"x": [1, 2, 3, 4, 5]})
+    ddf = dd.from_pandas(df, npartitions=2)
+    assert ddf.known_divisions is True
+
+    cleared = ddf.index.map(lambda x: x * 10)
+    assert cleared.known_divisions is False
+
+    applied = ddf.index.map(lambda x: x * 10, is_monotonic=True)
+    assert applied.known_divisions is True
+    assert applied.divisions == tuple(x * 10 for x in ddf.divisions)
 
 
 def test_assign_index():

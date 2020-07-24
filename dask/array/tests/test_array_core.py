@@ -130,6 +130,57 @@ def test_blockwise_literals():
     assert_eq(z, x)
 
 
+def test_blockwise_1_in_shape_I():
+    def test_f(a, b):
+        assert 1 in b.shape
+
+    p, k, N = 7, 2, 5
+    da.blockwise(
+        test_f,
+        "x",
+        da.zeros((2 * p, 9, k * N), chunks=(p, 3, k)),
+        "xzt",
+        da.zeros((2 * p, 9, 1), chunks=(p, 3, -1)),
+        "xzt",
+        concatenate=True,
+        dtype=float,
+    ).compute()
+
+
+def test_blockwise_1_in_shape_II():
+    def test_f(a, b):
+        assert 1 in b.shape
+
+    p, k, N = 7, 2, 5
+    da.blockwise(
+        test_f,
+        "x",
+        da.zeros((2 * p, 9, k * N, 8), chunks=(p, 9, k, 4)),
+        "xztu",
+        da.zeros((2 * p, 9, 1, 8), chunks=(p, 9, -1, 4)),
+        "xztu",
+        concatenate=True,
+        dtype=float,
+    ).compute()
+
+
+def test_blockwise_1_in_shape_III():
+    def test_f(a, b):
+        assert 1 in b.shape
+
+    k, N = 2, 5
+    da.blockwise(
+        test_f,
+        "x",
+        da.zeros((k * N, 9, 8), chunks=(k, 3, 4)),
+        "xtu",
+        da.zeros((1, 9, 8), chunks=(-1, 3, 4)),
+        "xtu",
+        concatenate=True,
+        dtype=float,
+    ).compute()
+
+
 def test_concatenate3_on_scalars():
     assert_eq(concatenate3([1, 2]), np.array([1, 2]))
 
@@ -360,6 +411,43 @@ def test_stack_rechunk():
     assert z.chunks == ((1, 1), (4, 1, 3, 2))
 
     assert_eq(z, np.stack([x.compute(), y.compute()], axis=0))
+
+
+def test_stack_unknown_chunksizes():
+    dd = pytest.importorskip("dask.dataframe")
+    pd = pytest.importorskip("pandas")
+
+    a_df = pd.DataFrame({"x": np.arange(12)})
+    b_df = pd.DataFrame({"y": np.arange(12) * 10})
+
+    a_ddf = dd.from_pandas(a_df, sort=False, npartitions=3)
+    b_ddf = dd.from_pandas(b_df, sort=False, npartitions=3)
+
+    a_x = a_ddf.values
+    b_x = b_ddf.values
+
+    assert np.isnan(a_x.shape[0])
+    assert np.isnan(b_x.shape[0])
+
+    with pytest.raises(ValueError) as exc_info:
+        da.stack([a_x, b_x], axis=0)
+
+    assert "shape" in str(exc_info.value)
+    assert "nan" in str(exc_info.value)
+
+    c_x = da.stack([a_x, b_x], axis=0, allow_unknown_chunksizes=True)
+
+    assert_eq(c_x, np.stack([a_df.values, b_df.values], axis=0))
+
+    with pytest.raises(ValueError) as exc_info:
+        da.stack([a_x, b_x], axis=1)
+
+    assert "shape" in str(exc_info.value)
+    assert "nan" in str(exc_info.value)
+
+    c_x = da.stack([a_x, b_x], axis=1, allow_unknown_chunksizes=True)
+
+    assert_eq(c_x, np.stack([a_df.values, b_df.values], axis=1))
 
 
 def test_concatenate():
@@ -2277,8 +2365,7 @@ def test_from_array_tasks_always_call_getter(x, chunks):
 
 
 def test_from_array_ndarray_onechunk():
-    """ndarray with a single chunk produces a minimal single key dict
-    """
+    """ndarray with a single chunk produces a minimal single key dict"""
     x = np.array([[1, 2], [3, 4]])
     dx = da.from_array(x, chunks=-1)
     assert_eq(x, dx)
@@ -2297,8 +2384,7 @@ def test_from_array_ndarray_getitem():
 
 @pytest.mark.parametrize("x", [[1, 2], (1, 2), memoryview(b"abc")])
 def test_from_array_list(x):
-    """Lists, tuples, and memoryviews are automatically converted to ndarray
-    """
+    """Lists, tuples, and memoryviews are automatically converted to ndarray"""
     dx = da.from_array(x, chunks=-1)
     assert_eq(np.array(x), dx)
     assert isinstance(dx.dask[dx.name, 0], np.ndarray)
@@ -2311,8 +2397,7 @@ def test_from_array_list(x):
 
 @pytest.mark.parametrize("type_", [t for t in np.ScalarType if t is not memoryview])
 def test_from_array_scalar(type_):
-    """Python and numpy scalars are automatically converted to ndarray
-    """
+    """Python and numpy scalars are automatically converted to ndarray"""
     if type_ == np.datetime64:
         x = np.datetime64("2000-01-01")
     else:
@@ -3584,8 +3669,10 @@ def test_stack_errs():
     with pytest.raises(ValueError) as e:
         da.stack([da.zeros((2,), chunks=2)] * 10 + [da.zeros((3,), chunks=3)] * 10)
 
-    assert "shape" in str(e.value).lower()
-    assert "(2,)" in str(e.value)
+    assert (
+        str(e.value)
+        == "Stacked arrays must have the same shape. The first array had shape (2,), while array 11 has shape (3,)."
+    )
     assert len(str(e.value)) < 105
 
 
@@ -4042,6 +4129,33 @@ def test_dask_array_holds_scipy_sparse_containers():
     assert (zz == xx.T).all()
 
 
+@pytest.mark.parametrize("axis", [0, 1])
+def test_scipy_sparse_concatenate(axis):
+    pytest.importorskip("scipy.sparse")
+    import scipy.sparse
+
+    rs = da.random.RandomState(RandomState=np.random.RandomState)
+
+    xs = []
+    ys = []
+    for i in range(2):
+        x = rs.random((1000, 10), chunks=(100, 10))
+        x[x < 0.9] = 0
+        xs.append(x)
+        ys.append(x.map_blocks(scipy.sparse.csr_matrix))
+
+    z = da.concatenate(ys, axis=axis)
+    z = z.compute()
+
+    if axis == 0:
+        sp_concatenate = scipy.sparse.vstack
+    elif axis == 1:
+        sp_concatenate = scipy.sparse.hstack
+    z_expected = sp_concatenate([scipy.sparse.csr_matrix(e.compute()) for e in xs])
+
+    assert (z != z_expected).nnz == 0
+
+
 def test_3851():
     with warnings.catch_warnings() as record:
         Y = da.random.random((10, 10), chunks="auto")
@@ -4177,6 +4291,9 @@ def test_compute_chunk_sizes():
     assert y is z
     assert z.chunks == ((10, 10, 5, 0, 0),)
     assert len(z) == 25
+
+    # check that dtype of chunk dimensions is `int`
+    assert isinstance(z.chunks[0][0], int)
 
 
 def test_compute_chunk_sizes_2d_array():

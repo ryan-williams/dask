@@ -1,3 +1,8 @@
+.. note::
+
+    Help inform future development and improve the Dask community experience -
+    take the `2020 Dask User Survey <https://forms.gle/7k9fWx3rwRWL2sPG8>`_
+
 ====
 Dask
 ====
@@ -186,6 +191,7 @@ messy situations in everyday problems.
    spark.rst
    caching.rst
    graphs.rst
+   phases-of-computation.rst
    remote-data-services.rst
    gpu.rst
    cite.rst

@@ -210,8 +210,7 @@ def getem(
     """
     out_name = out_name or arr
     chunks = normalize_chunks(chunks, shape, dtype=dtype)
-
-    keys = list(product([out_name], *[range(len(bds)) for bds in chunks]))
+    keys = product([out_name], *(range(len(bds)) for bds in chunks))
     slices = slices_from_chunks(chunks)
 
     if (
@@ -1153,7 +1152,11 @@ class Array(DaskMethodsMixin):
 
             c.append(tuple(chunk_shapes[s]))
 
-        x._chunks = compute(tuple(c))[0]
+        # `map_blocks` assigns numpy dtypes
+        # cast chunk dimensions back to python int before returning
+        x._chunks = tuple(
+            [tuple([int(chunk) for chunk in chunks]) for chunks in compute(tuple(c))[0]]
+        )
         return x
 
     @property
@@ -1431,7 +1434,7 @@ class Array(DaskMethodsMixin):
         """
         return to_hdf5(filename, datapath, self, **kwargs)
 
-    def to_dask_dataframe(self, columns=None, index=None):
+    def to_dask_dataframe(self, columns=None, index=None, meta=None):
         """ Convert dask Array to dask Dataframe
 
         Parameters
@@ -1449,6 +1452,10 @@ class Array(DaskMethodsMixin):
             Specifying ``index`` can be useful if you're conforming a Dask Array
             to an existing dask Series or DataFrame, and you would like the
             indices to match.
+        meta : object, optional
+            An optional `meta` parameter can be passed for dask
+            to specify the concrete dataframe type to use for partitions of
+            the Dask dataframe. By default, pandas DataFrame is used.
 
         See Also
         --------
@@ -1456,7 +1463,7 @@ class Array(DaskMethodsMixin):
         """
         from ..dataframe import from_dask_array
 
-        return from_dask_array(self, columns=columns, index=index)
+        return from_dask_array(self, columns=columns, index=index, meta=meta)
 
     def __bool__(self):
         if self.size > 1:
@@ -1620,7 +1627,7 @@ class Array(DaskMethodsMixin):
             tuple(np.array(c)[i].tolist()) for c, i in zip(self.chunks, index)
         )
 
-        keys = list(product(*[range(len(c)) for c in chunks]))
+        keys = product(*(range(len(c)) for c in chunks))
 
         layer = {(name,) + key: tuple(new_keys[key].tolist()) for key in keys}
 
@@ -2165,7 +2172,9 @@ class Array(DaskMethodsMixin):
         """
         from .overlap import map_overlap
 
-        return map_overlap(self, func, depth, boundary, trim, **kwargs)
+        return map_overlap(
+            func, self, depth=depth, boundary=boundary, trim=trim, **kwargs
+        )
 
     @derived_from(np.ndarray)
     def cumsum(self, axis, dtype=None, out=None):
@@ -2506,6 +2515,19 @@ def normalize_chunks(chunks, shape=None, limit=None, dtype=None, previous_chunks
     return tuple(tuple(int(x) if not math.isnan(x) else x for x in c) for c in chunks)
 
 
+def _compute_multiplier(limit: int, dtype, largest_block: int, result):
+    """
+    Utility function for auto_chunk, to fin how much larger or smaller the ideal
+    chunk size is relative to what we have now.
+    """
+    return (
+        limit
+        / dtype.itemsize
+        / largest_block
+        / np.prod(list(r if r != 0 else 1 for r in result.values()))
+    )
+
+
 def auto_chunks(chunks, shape, limit, dtype, previous_chunks=None):
     """ Determine automatic chunks
 
@@ -2586,12 +2608,10 @@ def auto_chunks(chunks, shape, limit, dtype, previous_chunks=None):
                 ideal_shape.append(s)
 
         # How much larger or smaller the ideal chunk size is relative to what we have now
-        multiplier = (
-            limit / dtype.itemsize / largest_block / np.prod(list(result.values()))
-        )
+        multiplier = _compute_multiplier(limit, dtype, largest_block, result)
+
         last_multiplier = 0
         last_autos = set()
-
         while (
             multiplier != last_multiplier or autos != last_autos
         ):  # while things change
@@ -2600,6 +2620,9 @@ def auto_chunks(chunks, shape, limit, dtype, previous_chunks=None):
 
             # Expand or contract each of the dimensions appropriately
             for a in sorted(autos):
+                if ideal_shape[a] == 0:
+                    result[a] = 0
+                    continue
                 proposed = result[a] * multiplier ** (1 / len(autos))
                 if proposed > shape[a]:  # we've hit the shape boundary
                     autos.remove(a)
@@ -2610,9 +2633,7 @@ def auto_chunks(chunks, shape, limit, dtype, previous_chunks=None):
                     result[a] = round_to(proposed, ideal_shape[a])
 
             # recompute how much multiplier we have left, repeat
-            multiplier = (
-                limit / dtype.itemsize / largest_block / np.prod(list(result.values()))
-            )
+            multiplier = _compute_multiplier(limit, dtype, largest_block, result)
 
         for k, v in result.items():
             chunks[k] = v
@@ -3195,11 +3216,18 @@ def unify_chunks(*args, **kwargs):
     ):
         return dict(zip(inds[0], arrays[0].chunks)), arrays
 
-    nameinds = [(a.name if i is not None else a, i) for a, i in arginds]
-    blockdim_dict = {a.name: a.chunks for a, ind in arginds if ind is not None}
+    nameinds = []
+    blockdim_dict = dict()
+    max_parts = 0
+    for a, ind in arginds:
+        if ind is not None:
+            nameinds.append((a.name, ind))
+            blockdim_dict[a.name] = a.chunks
+            max_parts = max(max_parts, a.npartitions)
+        else:
+            nameinds.append((a, ind))
 
     chunkss = broadcast_dimensions(nameinds, blockdim_dict, consolidate=common_blockdim)
-    max_parts = max(arg.npartitions for arg, ind in arginds if ind is not None)
     nparts = np.prod(list(map(len, chunkss.values())))
 
     if warn and nparts and nparts >= max_parts * 10:
@@ -3464,7 +3492,11 @@ def concatenate(seq, axis=0, allow_unknown_chunksizes=False):
     if not seq:
         raise ValueError("Need array(s) to concatenate")
 
-    meta = np.concatenate([meta_from_array(s) for s in seq], axis=axis)
+    seq_metas = [meta_from_array(s) for s in seq]
+    _concatenate = concatenate_lookup.dispatch(
+        type(max(seq_metas, key=lambda x: getattr(x, "__array_priority__", 0)))
+    )
+    meta = _concatenate(seq_metas, axis=axis)
 
     # Promote types to match meta
     seq = [a.astype(meta.dtype) for a in seq]
@@ -4210,12 +4242,23 @@ def transposelist(arrays, axes, extradims=0):
     return reshapelist(newshape, result)
 
 
-def stack(seq, axis=0):
+def stack(seq, axis=0, allow_unknown_chunksizes=False):
     """
     Stack arrays along a new axis
 
     Given a sequence of dask arrays, form a new dask array by stacking them
     along a new dimension (axis=0 by default)
+
+    Parameters
+    ----------
+    seq: list of dask.arrays
+    axis: int
+        Dimension along which to align all of the arrays
+    allow_unknown_chunksizes: bool
+        Allow unknown chunksizes, such as come from converting from dask
+        dataframes.  Dask.array is unable to verify that chunks line up.  If
+        data comes from differently aligned sources then this can cause
+        unexpected results.
 
     Examples
     --------
@@ -4250,14 +4293,12 @@ def stack(seq, axis=0):
 
     if not seq:
         raise ValueError("Need array(s) to stack")
-    if not all(x.shape == seq[0].shape for x in seq):
-        idx = np.where(np.asanyarray([x.shape for x in seq]) != seq[0].shape)[0]
+    if not allow_unknown_chunksizes and not all(x.shape == seq[0].shape for x in seq):
+        idx = first(i for i in enumerate(seq) if i[1].shape != seq[0].shape)
         raise ValueError(
             "Stacked arrays must have the same shape. "
-            "The first {0} had shape {1}, while array "
-            "{2} has shape {3}".format(
-                idx[0], seq[0].shape, idx[0] + 1, seq[idx[0]].shape
-            )
+            "The first array had shape {0}, while array "
+            "{1} has shape {2}.".format(seq[0].shape, idx[0] + 1, idx[1].shape)
         )
 
     meta = np.stack([meta_from_array(a) for a in seq], axis=axis)
@@ -4539,13 +4580,13 @@ def _vindex_array(x, dict_indexes):
 
     try:
         broadcast_indexes = np.broadcast_arrays(*dict_indexes.values())
-    except ValueError:
+    except ValueError as e:
         # note: error message exactly matches numpy
         shapes_str = " ".join(str(a.shape) for a in dict_indexes.values())
         raise IndexError(
             "shape mismatch: indexing arrays could not be "
             "broadcast together with shapes " + shapes_str
-        )
+        ) from e
     broadcast_shape = broadcast_indexes[0].shape
 
     lookup = dict(zip(dict_indexes, broadcast_indexes))
@@ -4593,10 +4634,11 @@ def _vindex_array(x, dict_indexes):
         full_slices = [slice(None, None) if i is None else None for i in flat_indexes]
 
         name = "vindex-slice-" + token
-        dsk = dict(
-            (
-                keyname(name, i, okey),
-                (
+        vindex_merge_name = "vindex-merge-" + token
+        dsk = {}
+        for okey in other_blocks:
+            for i, key in enumerate(per_block):
+                dsk[keyname(name, i, okey)] = (
                     _vindex_transpose,
                     (
                         _vindex_slice,
@@ -4606,23 +4648,12 @@ def _vindex_array(x, dict_indexes):
                         ),
                     ),
                     axis,
-                ),
+                )
+            dsk[keyname(vindex_merge_name, 0, okey)] = (
+                _vindex_merge,
+                [list(pluck(0, per_block[key])) for key in per_block],
+                [keyname(name, i, okey) for i in range(len(per_block))],
             )
-            for i, key in enumerate(per_block)
-            for okey in other_blocks
-        )
-
-        dsk.update(
-            (
-                keyname("vindex-merge-" + token, 0, okey),
-                (
-                    _vindex_merge,
-                    [list(pluck(0, per_block[key])) for key in per_block],
-                    [keyname(name, i, okey) for i in range(len(per_block))],
-                ),
-            )
-            for okey in other_blocks
-        )
 
         result_1d = Array(
             HighLevelGraph.from_collections(out_name, dsk, dependencies=[x]),

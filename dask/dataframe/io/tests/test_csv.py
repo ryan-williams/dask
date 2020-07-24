@@ -15,10 +15,12 @@ import dask
 import dask.dataframe as dd
 from dask.dataframe._compat import tm
 from dask.base import compute_as_if_collection
+from dask.core import flatten
 from dask.dataframe.io.csv import (
     text_blocks_to_pandas,
     pandas_read_text,
     auto_blocksize,
+    block_mask,
 )
 from dask.dataframe.utils import assert_eq, has_known_categories
 from dask.bytes.core import read_bytes
@@ -180,16 +182,14 @@ def test_text_blocks_to_pandas_simple(reader, files):
     head = pandas_read_text(reader, files["2014-01-01.csv"], b"", {})
     header = files["2014-01-01.csv"].split(b"\n")[0] + b"\n"
 
-    df = text_blocks_to_pandas(reader, blocks, header, head, kwargs, collection=True)
+    df = text_blocks_to_pandas(reader, blocks, header, head, kwargs)
     assert isinstance(df, dd.DataFrame)
     assert list(df.columns) == ["name", "amount", "id"]
 
-    values = text_blocks_to_pandas(
-        reader, blocks, header, head, kwargs, collection=False
-    )
-    assert isinstance(values, list)
-    assert len(values) == 3
-    assert all(hasattr(item, "dask") for item in values)
+    values = text_blocks_to_pandas(reader, blocks, header, head, kwargs)
+    assert isinstance(values, dd.DataFrame)
+    assert hasattr(values, "dask")
+    assert len(values.dask) == 3
 
     assert_eq(df.amount.sum(), 100 + 200 + 300 + 400 + 500 + 600)
 
@@ -202,7 +202,7 @@ def test_text_blocks_to_pandas_kwargs(reader, files):
     head = pandas_read_text(reader, files["2014-01-01.csv"], b"", kwargs)
     header = files["2014-01-01.csv"].split(b"\n")[0] + b"\n"
 
-    df = text_blocks_to_pandas(reader, blocks, header, head, kwargs, collection=True)
+    df = text_blocks_to_pandas(reader, blocks, header, head, kwargs)
     assert list(df.columns) == ["name", "id"]
     result = df.compute()
     assert (result.columns == df.columns).all()
@@ -287,8 +287,8 @@ tsv_blocks = [
 def test_enforce_dtypes(reader, blocks):
     head = reader(BytesIO(blocks[0][0]), header=0)
     header = blocks[0][0].split(b"\n")[0] + b"\n"
-    dfs = text_blocks_to_pandas(reader, blocks, header, head, {}, collection=False)
-    dfs = dask.compute(*dfs, scheduler="sync")
+    dfs = text_blocks_to_pandas(reader, blocks, header, head, {})
+    dfs = dask.compute(dfs, scheduler="sync")
     assert all(df.dtypes.to_dict() == head.dtypes.to_dict() for df in dfs)
 
 
@@ -302,9 +302,7 @@ def test_enforce_columns(reader, blocks):
     head = reader(BytesIO(blocks[0][0]), header=0)
     header = blocks[0][0].split(b"\n")[0] + b"\n"
     with pytest.raises(ValueError):
-        dfs = text_blocks_to_pandas(
-            reader, blocks, header, head, {}, collection=False, enforce=True
-        )
+        dfs = text_blocks_to_pandas(reader, blocks, header, head, {}, enforce=True)
         dask.compute(*dfs, scheduler="sync")
 
 
@@ -453,8 +451,8 @@ def test_read_csv_include_path_column_is_dtype_category(dd_read, files):
         assert df.path.dtype == "category"
         assert has_known_categories(df.path)
 
-        dfs = dd_read("2014-01-*.csv", include_path_column=True, collection=False)
-        result = dfs[0].compute()
+        dfs = dd_read("2014-01-*.csv", include_path_column=True)
+        result = dfs.compute()
         assert result.path.dtype == "category"
         assert has_known_categories(result.path)
 
@@ -1415,10 +1413,58 @@ def test_to_csv_with_get():
     ddf = dd.from_pandas(df, npartitions=2)
 
     with tmpdir() as dn:
-        ddf.to_csv(dn, index=False, scheduler=my_get)
+        ddf.to_csv(dn, index=False, compute_kwargs={"scheduler": my_get})
         assert flag[0]
-        result = dd.read_csv(os.path.join(dn, "*")).compute().reset_index(drop=True)
-        assert_eq(result, df)
+        result = dd.read_csv(os.path.join(dn, "*"))
+        assert_eq(result, df, check_index=False)
+
+
+def test_to_csv_warns_using_scheduler_argument():
+    from dask.multiprocessing import get as mp_get
+
+    df = pd.DataFrame({"x": ["a", "b", "c", "d"], "y": [1, 2, 3, 4]})
+    ddf = dd.from_pandas(df, npartitions=2)
+
+    def my_get(*args, **kwargs):
+        return mp_get(*args, **kwargs)
+
+    with tmpdir() as dn:
+        with pytest.warns(FutureWarning):
+            ddf.to_csv(dn, index=False, scheduler=my_get)
+
+
+def test_to_csv_errors_using_multiple_scheduler_args():
+    from dask.multiprocessing import get as mp_get
+
+    df = pd.DataFrame({"x": ["a", "b", "c", "d"], "y": [1, 2, 3, 4]})
+    ddf = dd.from_pandas(df, npartitions=2)
+
+    def my_get(*args, **kwargs):
+        return mp_get(*args, **kwargs)
+
+    with tmpdir() as dn:
+        with pytest.raises(ValueError) and pytest.warns(FutureWarning):
+            ddf.to_csv(
+                dn, index=False, scheduler=my_get, compute_kwargs={"scheduler": my_get}
+            )
+
+
+def test_to_csv_keeps_all_non_scheduler_compute_kwargs():
+    from dask.multiprocessing import get as mp_get
+
+    def my_get(*args, **kwargs):
+        assert kwargs["test_kwargs_passed"] == "foobar"
+        return mp_get(*args, **kwargs)
+
+    df = pd.DataFrame({"x": ["a", "b", "c", "d"], "y": [1, 2, 3, 4]})
+    ddf = dd.from_pandas(df, npartitions=2)
+
+    with tmpdir() as dn:
+        ddf.to_csv(
+            dn,
+            index=False,
+            compute_kwargs={"scheduler": my_get, "test_kwargs_passed": "foobar"},
+        )
 
 
 def test_to_csv_paths():
@@ -1504,3 +1550,17 @@ def test_to_csv_line_ending():
         with open(filename, "rb") as f:
             raw = f.read()
     assert raw in expected
+
+
+@pytest.mark.parametrize(
+    "block_lists",
+    [
+        [[1, 2], [3], [4, 5, 6]],
+        [],
+        [[], [], [1], [], [1]],
+        [list(range(i)) for i in range(10)],
+    ],
+)
+def test_block_mask(block_lists):
+    mask = list(block_mask(block_lists))
+    assert len(mask) == len(list(flatten(block_lists)))

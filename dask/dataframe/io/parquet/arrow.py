@@ -2,6 +2,7 @@ from functools import partial
 from collections import OrderedDict
 import json
 import warnings
+from distutils.version import LooseVersion
 
 import pandas as pd
 import pyarrow as pa
@@ -17,6 +18,8 @@ from .utils import (
     Engine,
     _analyze_paths,
 )
+
+preserve_ind_supported = pa.__version__ >= LooseVersion("0.15.0")
 
 
 def _get_md_row_groups(pieces):
@@ -144,6 +147,15 @@ def _determine_dataset_parts(fs, paths, gather_statistics, filters, dataset_kwar
             dataset = pq.ParquetDataset(
                 paths, filesystem=fs, filters=filters, **dataset_kwargs
             )
+            if dataset.schema is None:
+                # The dataset may have inconsistent schemas between files.
+                # If so, we should try to use a "_common_metadata" file
+                proxy_path = (
+                    base + fs.sep + "_common_metadata"
+                    if "_common_metadata" in fns
+                    else paths[0]
+                )
+                dataset.schema = pq.ParquetDataset(proxy_path, filesystem=fs).schema
         else:
             # Rely on schema for 0th file.
             # Will need to pass a list of paths to read_partition
@@ -163,6 +175,15 @@ def _determine_dataset_parts(fs, paths, gather_statistics, filters, dataset_kwar
             dataset = pq.ParquetDataset(
                 paths, filesystem=fs, filters=filters, **dataset_kwargs
             )
+            if dataset.schema is None:
+                # The dataset may have inconsistent schemas between files.
+                # If so, we should try to use a "_common_metadata" file
+                proxy_path = (
+                    base + fs.sep + "_common_metadata"
+                    if "_common_metadata" in fns
+                    else allpaths[0]
+                )
+                dataset.schema = pq.ParquetDataset(proxy_path, filesystem=fs).schema
         else:
             # Use _common_metadata file if it is available.
             # Otherwise, just use 0th file
@@ -181,9 +202,7 @@ def _determine_dataset_parts(fs, paths, gather_statistics, filters, dataset_kwar
     return parts, dataset
 
 
-def _write_partitioned(
-    table, root_path, partition_cols, fs, preserve_index=True, **kwargs
-):
+def _write_partitioned(table, root_path, partition_cols, fs, index_cols=(), **kwargs):
     """ Write table to a partitioned dataset with pyarrow.
 
         Logic copied from pyarrow.parquet.
@@ -195,10 +214,16 @@ def _write_partitioned(
     fs.mkdirs(root_path, exist_ok=True)
 
     df = table.to_pandas(ignore_metadata=True)
+    index_cols = list(index_cols) if index_cols else []
+    preserve_index = False
+    if index_cols and preserve_ind_supported:
+        df.set_index(index_cols, inplace=True)
+        preserve_index = True
+
     partition_keys = [df[col] for col in partition_cols]
     data_df = df.drop(partition_cols, axis="columns")
     data_cols = df.columns.drop(partition_cols)
-    if len(data_cols) == 0 and not preserve_index:
+    if len(data_cols) == 0 and not index_cols:
         raise ValueError("No data left to save outside partition columns")
 
     subschema = table.schema
@@ -217,7 +242,7 @@ def _write_partitioned(
             ]
         )
         subtable = pa.Table.from_pandas(
-            subgroup, preserve_index=False, schema=subschema, safe=False
+            subgroup, preserve_index=preserve_index, schema=subschema, safe=False
         )
         prefix = fs.sep.join([root_path, subdir])
         fs.mkdir(prefix, exists_ok=True)
@@ -230,9 +255,20 @@ def _write_partitioned(
     return md_list
 
 
+def _index_in_schema(index, schema):
+    if index and schema is not None:
+        # Make sure all index columns are in user-defined schema
+        return len(set(index).intersection(schema.names)) == len(index)
+    elif index:
+        return True  # Schema is not user-specified, all good
+    else:
+        return False  # No index to check
+
+
 class ArrowEngine(Engine):
-    @staticmethod
+    @classmethod
     def read_metadata(
+        cls,
         fs,
         paths,
         categories=None,
@@ -468,8 +504,9 @@ class ArrowEngine(Engine):
                         categories=partition.keys, name=meta.index.name
                     )
                 elif partition.name in meta.columns:
-                    meta[partition.name] = pd.Categorical(
-                        categories=partition.keys, values=[]
+                    meta[partition.name] = pd.Series(
+                        pd.Categorical(categories=partition.keys, values=[]),
+                        index=meta.index,
                     )
 
         # Create `parts`
@@ -502,11 +539,11 @@ class ArrowEngine(Engine):
             for piece in parts
         ]
 
-        return (meta, stats, parts)
+        return (meta, stats, parts, index)
 
-    @staticmethod
+    @classmethod
     def read_partition(
-        fs, piece, columns, index, categories=(), partitions=(), **kwargs
+        cls, fs, piece, columns, index, categories=(), partitions=(), **kwargs
     ):
         if isinstance(index, list):
             for level in index:
@@ -540,13 +577,8 @@ class ArrowEngine(Engine):
                     columns_and_parts.append(part_name)
             columns = columns or None
 
-        df = piece.read(
-            columns=columns,
-            partitions=partitions,
-            use_pandas_metadata=True,
-            use_threads=False,
-            **kwargs.get("read", {}),
-        ).to_pandas(categories=categories, use_threads=False, ignore_metadata=False)
+        arrow_table = cls._parquet_piece_as_arrow(piece, columns, partitions, **kwargs)
+        df = cls._arrow_table_to_pandas(arrow_table, categories, **kwargs)
 
         # Note that `to_pandas(ignore_metadata=False)` means
         # pyarrow will use the pandas metadata to set the index.
@@ -578,6 +610,28 @@ class ArrowEngine(Engine):
         if index:
             df = df.set_index(index)
         return df
+
+    @classmethod
+    def _arrow_table_to_pandas(
+        cls, arrow_table: pa.Table, categories, **kwargs
+    ) -> pd.DataFrame:
+        _kwargs = kwargs.get("arrow_to_pandas", {})
+        _kwargs.update({"use_threads": False, "ignore_metadata": False})
+
+        return arrow_table.to_pandas(categories=categories, **_kwargs)
+
+    @classmethod
+    def _parquet_piece_as_arrow(
+        cls, piece: pq.ParquetDatasetPiece, columns, partitions, **kwargs
+    ) -> pa.Table:
+        arrow_table = piece.read(
+            columns=columns,
+            partitions=partitions,
+            use_pandas_metadata=True,
+            use_threads=False,
+            **kwargs.get("read", {}),
+        )
+        return arrow_table
 
     @staticmethod
     def initialize_write(
@@ -691,13 +745,15 @@ class ArrowEngine(Engine):
     ):
         _meta = None
         preserve_index = False
-        if index_cols:
-            df = df.set_index(index_cols)
+        if _index_in_schema(index_cols, schema):
+            df.set_index(index_cols, inplace=True)
             preserve_index = True
+        else:
+            index_cols = []
         t = pa.Table.from_pandas(df, preserve_index=preserve_index, schema=schema)
         if partition_on:
             md_list = _write_partitioned(
-                t, path, partition_on, fs, preserve_index=preserve_index, **kwargs
+                t, path, partition_on, fs, index_cols=index_cols, **kwargs
             )
             if md_list:
                 _meta = md_list[0]

@@ -61,7 +61,13 @@ class _iLocIndexer(_IndexerBase):
         if iindexer != slice(None):
             raise NotImplementedError(msg)
 
-        return self._iloc(iindexer, cindexer)
+        if not self.obj.columns.is_unique:
+            # if there are any duplicate column names, do an iloc
+            return self._iloc(iindexer, cindexer)
+        else:
+            # otherwise dispatch to dask.dataframe.core.DataFrame.__getitem__
+            col_names = self.obj.columns[cindexer]
+            return self.obj.__getitem__(col_names)
 
     def _iloc(self, iindexer, cindexer):
         assert iindexer == slice(None)
@@ -100,6 +106,8 @@ class _LocIndexer(_IndexerBase):
             return self._loc_series(iindexer, cindexer)
         elif isinstance(iindexer, Array):
             return self._loc_array(iindexer, cindexer)
+        elif callable(iindexer):
+            return self._loc(iindexer(self.obj), cindexer)
 
         if self.obj.known_divisions:
             iindexer = self._maybe_partial_time_string(iindexer)

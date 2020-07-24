@@ -42,7 +42,7 @@ from ..utils import (
     typename,
 )
 from ..array.core import Array, normalize_arg
-from ..array.utils import empty_like_safe, zeros_like_safe
+from ..array.utils import zeros_like_safe
 from ..blockwise import blockwise, Blockwise
 from ..base import DaskMethodsMixin, tokenize, dont_optimize, is_dask_collection
 from ..delayed import delayed, Delayed, unpack_collections
@@ -63,6 +63,7 @@ from .utils import (
     has_known_categories,
     PANDAS_VERSION,
     PANDAS_GT_100,
+    PANDAS_GT_110,
     index_summary,
     is_dataframe_like,
     is_series_like,
@@ -248,10 +249,9 @@ def _scalar_binary(op, self, other, inv=False):
     else:
         other_key = other
 
-    if inv:
-        dsk.update({(name, 0): (op, other_key, (self._name, 0))})
-    else:
-        dsk.update({(name, 0): (op, (self._name, 0), other_key)})
+    dsk[(name, 0)] = (
+        (op, other_key, (self._name, 0)) if inv else (op, (self._name, 0), other_key)
+    )
 
     other_meta = make_meta(other)
     other_meta_nonempty = meta_nonempty(other_meta)
@@ -538,7 +538,7 @@ Dask Name: {name}, {task} tasks"""
             split_out_setup=split_out_setup,
             split_out_setup_kwargs=split_out_setup_kwargs,
             ignore_index=ignore_index,
-            **kwargs
+            **kwargs,
         )
 
     def __len__(self):
@@ -787,7 +787,7 @@ Dask Name: {name}, {task} tasks"""
         Returns
         -------
         Series
-            A Series whose index is the parition number and whose values
+            A Series whose index is the partition number and whose values
             are the memory usage of each partition in bytes.
         """
         return self.map_partitions(
@@ -806,7 +806,7 @@ Dask Name: {name}, {task} tasks"""
         chunk_kwargs=None,
         aggregate_kwargs=None,
         combine_kwargs=None,
-        **kwargs
+        **kwargs,
     ):
         """Generic row-wise reductions.
 
@@ -936,7 +936,7 @@ Dask Name: {name}, {task} tasks"""
             chunk_kwargs=chunk_kwargs,
             aggregate_kwargs=aggregate_kwargs,
             combine_kwargs=combine_kwargs,
-            **kwargs
+            **kwargs,
         )
 
     @derived_from(pd.DataFrame)
@@ -1206,7 +1206,7 @@ Dask Name: {name}, {task} tasks"""
         ):
             raise ValueError(
                 "Please provide exactly one of ``npartitions=``, ``freq=``, "
-                "``divisisions=``, ``partitions_size=`` keyword arguments"
+                "``divisions=``, ``partitions_size=`` keyword arguments"
             )
 
         if partition_size is not None:
@@ -1217,6 +1217,61 @@ Dask Name: {name}, {task} tasks"""
             return repartition(self, divisions, force=force)
         elif freq is not None:
             return repartition_freq(self, freq=freq)
+
+    def shuffle(
+        self,
+        on,
+        npartitions=None,
+        max_branch=None,
+        shuffle=None,
+        ignore_index=False,
+        compute=None,
+    ):
+        """ Rearrange DataFrame into new partitions
+
+        Uses hashing of `on` to map rows to output partitions. After this
+        operation, rows with the same value of `on` will be in the same
+        partition.
+
+        Parameters
+        ----------
+        on : str, list of str, or Series, Index, or DataFrame
+            Column(s) or index to be used to map rows to output partitions
+        npartitions : int, optional
+            Number of partitions of output. Partition count will not be
+            changed by default.
+        max_branch: int, optional
+            The maximum number of splits per input partition. Used within
+            the staged shuffling algorithm.
+        shuffle: {'disk', 'tasks'}, optional
+            Either ``'disk'`` for single-node operation or ``'tasks'`` for
+            distributed operation.  Will be inferred by your current scheduler.
+        ignore_index: bool, default False
+            Ignore index during shuffle.  If ``True``, performance may improve,
+            but index values will not be preserved.
+        compute: bool
+            Whether or not to trigger an immediate computation. Defaults to False.
+
+        Notes
+        -----
+        This does not preserve a meaningful index/partitioning scheme. This
+        is not deterministic if done in parallel.
+
+        Examples
+        --------
+        >>> df = df.shuffle(df.columns[0])  # doctest: +SKIP
+        """
+        from .shuffle import shuffle as dd_shuffle
+
+        return dd_shuffle(
+            self,
+            on,
+            npartitions=npartitions,
+            max_branch=max_branch,
+            shuffle=shuffle,
+            ignore_index=ignore_index,
+            compute=compute,
+        )
 
     @derived_from(pd.DataFrame)
     def fillna(self, value=None, method=None, limit=None, axis=None):
@@ -1251,7 +1306,7 @@ Dask Name: {name}, {task} tasks"""
                 axis=axis,
                 meta=meta,
                 enforce_metadata=False,
-                **kwargs
+                **kwargs,
             )
 
         if method in ("pad", "ffill"):
@@ -1391,6 +1446,38 @@ Dask Name: {name}, {task} tasks"""
         from .io import to_csv
 
         return to_csv(self, filename, **kwargs)
+
+    def to_sql(
+        self,
+        name: str,
+        uri: str,
+        schema=None,
+        if_exists: str = "fail",
+        index: bool = True,
+        index_label=None,
+        chunksize=None,
+        dtype=None,
+        method=None,
+        compute=True,
+        parallel=False,
+    ):
+        """ See dd.to_sql docstring for more information """
+        from .io import to_sql
+
+        return to_sql(
+            self,
+            name=name,
+            uri=uri,
+            schema=schema,
+            if_exists=if_exists,
+            index=index,
+            index_label=index_label,
+            chunksize=chunksize,
+            dtype=dtype,
+            method=method,
+            compute=compute,
+            parallel=parallel,
+        )
 
     def to_json(self, filename, *args, **kwargs):
         """ See dd.to_json docstring for more information """
@@ -2016,7 +2103,7 @@ Dask Name: {name}, {task} tasks"""
 
             if isinstance(quantiles[0], Scalar):
                 layer = {
-                    (keyname, 0): (pd.Series, qnames, num.columns, None, meta.name)
+                    (keyname, 0): (type(meta), qnames, num.columns, None, meta.name)
                 }
                 graph = HighLevelGraph.from_collections(
                     keyname, layer, dependencies=quantiles
@@ -2138,7 +2225,7 @@ Dask Name: {name}, {task} tasks"""
         ]
         stats_names = [(s._name, 0) for s in stats]
 
-        colname = data._meta.name if isinstance(data._meta, pd.Series) else None
+        colname = data._meta.name if is_series_like(data._meta) else None
 
         name = "describe-numeric--" + tokenize(num, split_every)
         layer = {
@@ -2154,7 +2241,7 @@ Dask Name: {name}, {task} tasks"""
         return new_dd_object(graph, name, meta, divisions=[None, None])
 
     def _describe_nonnumeric_1d(self, data, split_every=False):
-        vcounts = data.value_counts(split_every)
+        vcounts = data.value_counts(split_every=split_every)
         count_nonzero = vcounts[vcounts != 0]
         count_unique = count_nonzero.size
 
@@ -2170,7 +2257,7 @@ Dask Name: {name}, {task} tasks"""
         if is_datetime64_any_dtype(data._meta):
             min_ts = data.dropna().astype("i8").min(split_every=split_every)
             max_ts = data.dropna().astype("i8").max(split_every=split_every)
-            stats += [min_ts, max_ts]
+            stats.extend([min_ts, max_ts])
 
         stats_names = [(s._name, 0) for s in stats]
         colname = data._meta.name
@@ -2909,7 +2996,22 @@ Dask Name: {name}, {task} tasks""".format(
         return self.drop_duplicates(split_every=split_every).count()
 
     @derived_from(pd.Series)
-    def value_counts(self, split_every=None, split_out=1):
+    def value_counts(
+        self, sort=None, ascending=False, dropna=None, split_every=None, split_out=1
+    ):
+        """
+        Note: dropna is only supported in pandas >= 1.1.0, in which case it defaults to
+        True.
+        """
+        kwargs = {"sort": sort, "ascending": ascending}
+        if dropna is not None:
+            if not PANDAS_GT_110:
+                raise NotImplementedError(
+                    "dropna is not a valid argument for dask.dataframe.value_counts "
+                    f"if pandas < 1.1.0. Pandas version is {pd.__version__}"
+                )
+            kwargs["dropna"] = dropna
+
         return aca(
             self,
             chunk=M.value_counts,
@@ -2920,6 +3022,7 @@ Dask Name: {name}, {task} tasks""".format(
             split_every=split_every,
             split_out=split_out,
             split_out_setup=split_out_on_index,
+            **kwargs,
         )
 
     @derived_from(pd.Series)
@@ -2977,7 +3080,7 @@ Dask Name: {name}, {task} tasks""".format(
         else:
             meta = make_meta(meta, index=getattr(make_meta(self), "index", None))
 
-        return Series(graph, name, meta, self.divisions, self.partition_sizes)
+        return type(self)(graph, name, meta, self.divisions, self.partition_sizes)
 
     @derived_from(pd.Series)
     def dropna(self):
@@ -3139,7 +3242,7 @@ Dask Name: {name}, {task} tasks""".format(
                 convert_dtype=convert_dtype,
                 args=args,
                 udf=True,
-                **kwds
+                **kwds,
             )
             warnings.warn(meta_warning(meta))
 
@@ -3372,6 +3475,26 @@ class Index(Series):
             else:
                 return self.map_partitions(M.to_frame, meta=self._meta.to_frame())
 
+    @insert_meta_param_description(pad=12)
+    @derived_from(pd.Index)
+    def map(self, arg, na_action=None, meta=no_default, is_monotonic=False):
+        """
+        Note that this method clears any known divisions.
+
+        If your mapping function is monotonically increasing then use `is_monotonic`
+        to apply the maping function to the old divisions and assign the new
+        divisions to the output.
+
+        """
+        applied = super(Index, self).map(arg, na_action=na_action, meta=meta)
+        if is_monotonic and self.known_divisions:
+            applied.divisions = tuple(
+                pd.Series(self.divisions).map(arg, na_action=na_action)
+            )
+        else:
+            applied = applied.clear_divisions()
+        return applied
+
 
 class DataFrame(_Frame):
     """
@@ -3434,6 +3557,7 @@ class DataFrame(_Frame):
         """
         from .indexing import _iLocIndexer
 
+        # For dataframes with unique column names, this will be transformed into a __getitem__ call
         return _iLocIndexer(self)
 
     def __len__(self):
@@ -3617,6 +3741,8 @@ class DataFrame(_Frame):
         if self._len:
             row_size = self._len
         else:
+            if col_size == 0:
+                return (self.index.shape[0], 0)
             row_size = delayed(int)(self.size / col_size)
         return (row_size, col_size)
 
@@ -3646,7 +3772,7 @@ class DataFrame(_Frame):
         npartitions=None,
         divisions=None,
         inplace=False,
-        **kwargs
+        **kwargs,
     ):
         """Set the DataFrame index (row labels) using an existing column.
 
@@ -3738,7 +3864,7 @@ class DataFrame(_Frame):
                 drop=drop,
                 npartitions=npartitions,
                 divisions=divisions,
-                **kwargs
+                **kwargs,
             )
 
     @derived_from(pd.DataFrame)
@@ -3816,7 +3942,7 @@ class DataFrame(_Frame):
                             v.npartitions, self.npartitions
                         )
                     )
-                kwargs[k] = from_dask_array(v, index=self.index)
+                kwargs[k] = from_dask_array(v, index=self.index, meta=self._meta)
 
         pairs = list(sum(kwargs.items(), ()))
 
@@ -4208,7 +4334,7 @@ class DataFrame(_Frame):
         reduce=None,
         args=(),
         meta=no_default,
-        **kwds
+        **kwds,
     ):
         """ Parallel version of pandas.DataFrame.apply
 
@@ -4676,7 +4802,7 @@ def is_broadcastable(dfs, s):
         and s.npartitions == 1
         and s.known_divisions
         and any(
-            s.divisions == (min(df.columns), max(df.columns))
+            s.divisions == (df.columns.min(), df.columns.max())
             for df in dfs
             if isinstance(df, DataFrame)
         )
@@ -4741,7 +4867,7 @@ def elemwise(op, *args, **kwargs):
         try:
             divisions = op(
                 *[pd.Index(arg.divisions) if arg is dfs[0] else arg for arg in args],
-                **kwargs
+                **kwargs,
             )
             if isinstance(divisions, pd.Index):
                 divisions = divisions.tolist()
@@ -4774,7 +4900,7 @@ def elemwise(op, *args, **kwargs):
         parts = [
             d._meta
             if _is_broadcastable(d)
-            else empty_like_safe(d, (), dtype=d.dtype)
+            else np.empty((), dtype=d.dtype)
             if isinstance(d, Array)
             else d._meta_nonempty
             for d in dasks
@@ -4892,7 +5018,7 @@ def apply_concat_apply(
     split_out_setup_kwargs=None,
     sort=None,
     ignore_index=False,
-    **kwargs
+    **kwargs,
 ):
     """Apply a function to blocks, then concat, then apply again
 
@@ -5129,7 +5255,7 @@ def map_partitions(
     meta=no_default,
     enforce_metadata=True,
     transform_divisions=True,
-    **kwargs
+    **kwargs,
 ):
     """ Apply Python function on each DataFrame partition.
 
@@ -5220,15 +5346,12 @@ def map_partitions(
             dependencies=dependencies,
             _func=func,
             _meta=meta,
-            **kwargs3
-        )
-    elif not simple:
-        dsk = partitionwise_graph(
-            apply, name, func, *args2, **kwargs3, dependencies=dependencies
+            **kwargs3,
         )
     else:
+        kwargs4 = kwargs if simple else kwargs3
         dsk = partitionwise_graph(
-            func, name, *args2, **kwargs, dependencies=dependencies
+            func, name, *args2, **kwargs4, dependencies=dependencies
         )
 
     divisions = dfs[0].divisions
@@ -5372,14 +5495,19 @@ def quantile(df, q, method="default"):
 
     # currently, only Series has quantile method
     if isinstance(df, Index):
-        meta = pd.Series(df._meta_nonempty).quantile(q)
+        series_typ = df._meta.to_series()._constructor
+        meta = df._meta_nonempty.to_series().quantile(q)
     else:
+        if is_series_like(df._meta):
+            series_typ = df._meta._constructor
+        else:
+            series_typ = df._meta._constructor_sliced
         meta = df._meta_nonempty.quantile(q)
 
     if is_series_like(meta):
         # Index.quantile(list-like) must be pd.Series, not pd.Index
         df_name = df.name
-        finalize_tsk = lambda tsk: (pd.Series, tsk, q, None, df_name)
+        finalize_tsk = lambda tsk: (series_typ, tsk, q, None, df_name)
         return_type = Series
     else:
         finalize_tsk = lambda tsk: (getitem, tsk, 0)
@@ -5394,8 +5522,9 @@ def quantile(df, q, method="default"):
     if len(qs) == 0:
         name = "quantiles-" + token
         empty_index = pd.Index([], dtype=float)
+
         return Series(
-            {(name, 0): pd.Series([], name=df.name, index=empty_index, dtype="float")},
+            {(name, 0): series_typ([], name=df.name, index=empty_index, dtype="float")},
             name,
             df._meta,
             [None, None],
@@ -6421,8 +6550,6 @@ def prefix_reduction(f, ddf, identity, **kwargs):
     ddf : dd.DataFrame
     identity : pd.DataFrame
         an identity element of f, that is f(identity, df) = f(df, identity) = df
-    kwargs : ??
-        keyword arguments of f ??
     """
     dsk = dict()
     name = "prefix_reduction-" + tokenize(f, ddf, identity, **kwargs)
