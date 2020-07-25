@@ -450,7 +450,6 @@ Dask Name: {name}, {task} tasks"""
             preserve_partitions=True,
         )
         if self._len:
-            print(f'Propagating size {self._len} to index')
             index._len = self._len
         return index
 
@@ -656,8 +655,6 @@ Dask Name: {name}, {task} tasks"""
         """
         result = map_partitions(func, self, *args, **kwargs)
         if preserve_partitions:
-            if self._len:
-                print(f'propagating _len {self._len} through map_partitions')
             result._len = self._len
             result.partition_sizes = self.partition_sizes
         return result
@@ -3596,10 +3593,7 @@ class DataFrame(_Frame):
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
             result = new_dd_object(graph, name, meta, self.divisions, self.partition_sizes)
             if self._len:
-                print(f'propagating size {self._len} to Series {key}')
                 result._len = self._len
-            else:
-                print(f'No _len found for {self}')
             return result
 
         elif isinstance(key, slice):
@@ -3695,18 +3689,10 @@ class DataFrame(_Frame):
             object.__setattr__(self, key, value)
 
     def __getattr__(self, key):
-        print(f'{type(self)}.getattr: {key}')
         if key in self.columns:
             return self[key]
         elif key == '_len':
-            #return
-            sup = super()
-            print(f'{type(self)} returning super len: {sup} ({type(sup)})')
-            return sup._len
-            #raise ValueError
-            #return super().__getattr__(key)
-        # elif hasattr(super(), key):
-        #     return getattr(super(), key)
+            return super()._len
         else:
             raise AttributeError("'DataFrame' object has no attribute %r" % key)
 
