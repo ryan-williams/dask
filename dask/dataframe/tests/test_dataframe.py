@@ -228,6 +228,16 @@ def test_partition_sizes():
     assert df[evens].partition_sizes == [34,34,32]
     assert evens[evens].partition_sizes == [34,34,32]
 
+    # from dask.array import from_array
+    # from numpy import array
+    # a = array(range(77)).reshape((7,11))
+    # d = from_array(a, chunks=(3,2))
+    # assert d.chunks == ((3,3,1), (2,2,2,2,2,1))
+    # from numpy.testing import assert_array_equal
+    # dask_sliced = d[evens]
+    # np_sliced = a[evens.compute()]
+    # assert_array_equal(dask_sliced.compute(), np_sliced)
+
 
 def test_iloc():
     df = pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ])

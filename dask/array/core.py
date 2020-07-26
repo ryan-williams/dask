@@ -1512,10 +1512,18 @@ class Array(DaskMethodsMixin):
 
     def __getitem__(self, index):
         if is_dask_collection(index):
-            # NOTE: This will resolve the index and then use it.
-            # Ideally, if the index is partitioned like this array,
-            # we could apply each partition in the index to each partition in self. -ssmith
-            return self.map_blocks(operator.getitem, index, dtype=self.dtype)
+            self_type = '%s.%s' % (self.__class__.__module__, self.__class__.__name__)
+            index_type = '%s.%s' % (index.__class__.__module__, index.__class__.__name__)
+            if index_type != 'dask.dataframe.core.Series':
+                raise ValueError("Can only slice a %s by a dask.dataframe.core.Series, not %s" % (self_type, index_type))
+            if not index.partition_sizes:
+                raise ValueError("Can't slice a %s with a %s that doesn't know its partition_sizes" % (self_type, index_type))
+            from numpy import dtype
+            if not index.dtype == dtype(bool):
+                raise ValueError("Slicing by %s series not supported, only bools" % index.dtype)
+
+            partition_sizes = self.chunks[0]
+            row_idxs = np.cumsum(partition_sizes)
 
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (

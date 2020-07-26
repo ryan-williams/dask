@@ -1169,6 +1169,7 @@ Dask Name: {name}, {task} tasks"""
         divisions=None,
         npartitions=None,
         partition_size=None,
+        partition_sizes=None,
         freq=None,
         force=False,
     ):
@@ -1202,7 +1203,7 @@ Dask Name: {name}, {task} tasks"""
 
         Notes
         -----
-        Exactly one of `divisions`, `npartitions`, `partition_size`, or `freq`
+        Exactly one of `divisions`, `npartitions`, `partition_size`, `partition_sizes`, or `freq`
         should be specified. A ``ValueError`` will be raised when that is
         not the case.
 
@@ -1216,6 +1217,7 @@ Dask Name: {name}, {task} tasks"""
             sum(
                 [
                     partition_size is not None,
+                    partition_sizes is not None,
                     divisions is not None,
                     npartitions is not None,
                     freq is not None,
@@ -1225,11 +1227,13 @@ Dask Name: {name}, {task} tasks"""
         ):
             raise ValueError(
                 "Please provide exactly one of ``npartitions=``, ``freq=``, "
-                "``divisions=``, ``partitions_size=`` keyword arguments"
+                "``divisions=``, ``partitions_size=``, ``partition_sizes=`` keyword arguments"
             )
 
         if partition_size is not None:
             return repartition_size(self, partition_size)
+        elif partition_sizes is not None:
+            return repartition_sizes(self, partition_sizes)
         elif npartitions is not None:
             return repartition_npartitions(self, npartitions)
         elif divisions is not None:
@@ -6040,6 +6044,25 @@ def repartition_size(df, size):
     new_partitions_boundaries = np.cumsum(new_npartitions)
     new_name = "repartition-{}-{}".format(size, tokenize(df))
     return _repartition_from_boundaries(df, new_partitions_boundaries, new_name)
+
+
+def repartition_sizes(df, sizes):
+    if not hasattr(df, 'partition_sizes'):
+        raise ValueError("Can't repartition %s based on partition_sizes, don't know existing partition sizes")
+    partition_sizes = df.partition_sizes
+    if partition_sizes == sizes:
+        return df
+
+    cur_len = sum(partition_sizes)
+    nxt_len = sum(sizes)
+    if cur_len != nxt_len:
+        raise ValueError("Current len %d != new len %d" % (cur_len, nxt_len))
+
+    new_idxs = np.cumsum(sizes)
+
+    slices = [ df.iloc[new_idxs[i]:new_idxs[i+1]] for i in range(len(sizes)) ]
+    from dask.dataframe import from_delayed
+    return from_delayed(slices, meta=df.meta)
 
 
 def total_mem_usage(df, index=True, deep=False):
