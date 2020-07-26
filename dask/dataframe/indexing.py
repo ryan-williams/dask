@@ -138,7 +138,9 @@ class _iLocIndexer(_IndexerBase):
                 start = first_partition['m'] - first_partition['start']
                 end = min(first_partition['end'], first_partition['M'])
                 drop_right = first_partition['end'] - end
-                partition_sizes_prefix = [ partition_sizes[first_partition_idx] - start - drop_right ]
+                partition_sizes_prefix = [
+                    partition_sizes[first_partition_idx] - start - drop_right
+                ]
                 partial_prefix = \
                     obj \
                         .partitions[first_partition_idx] \
@@ -155,9 +157,14 @@ class _iLocIndexer(_IndexerBase):
                 divisions[-1] = None
                 last_full_partition_idx -= 1
                 if not has_clipped_single_partition:
+                    # Only compute+set a "suffix" if the partial final partition is not the same
+                    # as a partial initial partition (handled above)
                     end = last_partition['end'] - last_partition['M']
                     partition_sizes_suffix = [ partition_sizes[last_partition_idx] - end ]
-                    partial_suffix = obj.partitions[last_partition_idx].map_partitions(lambda df, end: df.iloc[:-end], end)
+                    partial_suffix = \
+                        obj \
+                            .partitions[last_partition_idx] \
+                            .map_partitions(lambda df, end: df.iloc[:-end], end)
 
             full_partition_idx_range = slice(first_full_partition_idx, last_full_partition_idx + 1)
             num_full_partitions = max(0, last_full_partition_idx + 1 - first_full_partition_idx)
@@ -213,7 +220,7 @@ class _iLocIndexer(_IndexerBase):
         assert iindexer == slice(None)
         meta = self._make_meta(iindexer, cindexer)
 
-        return self.obj.map_partitions(methods.iloc, cindexer, meta=meta)
+        return self.obj.map_partitions(methods.iloc, cindexer, meta=meta, preserve_partitions=True)
 
 
 class _LocIndexer(_IndexerBase):
@@ -270,7 +277,7 @@ class _LocIndexer(_IndexerBase):
 
             meta = self._make_meta(iindexer, cindexer)
             return self.obj.map_partitions(
-                methods.try_loc, iindexer, cindexer, meta=meta
+                methods.try_loc, iindexer, cindexer, meta=meta,  # TODO: partition_sizes
             )
 
     def _maybe_partial_time_string(self, iindexer):
@@ -285,7 +292,7 @@ class _LocIndexer(_IndexerBase):
     def _loc_series(self, iindexer, cindexer):
         meta = self._make_meta(iindexer, cindexer)
         return self.obj.map_partitions(
-            methods.loc, iindexer, cindexer, token="loc-series", meta=meta
+            methods.loc, iindexer, cindexer, token="loc-series", meta=meta  # TODO: partition_sizes
         )
 
     def _loc_array(self, iindexer, cindexer):

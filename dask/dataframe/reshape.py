@@ -172,6 +172,7 @@ def get_dummies(
         sparse=sparse,
         drop_first=drop_first,
         meta=meta,
+        preserve_partitions=True,
         dtype=dtype,
         **kwargs
     )

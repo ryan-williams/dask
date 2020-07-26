@@ -13,7 +13,7 @@ from dask.array.numpy_compat import _numpy_118
 import dask.dataframe as dd
 from dask.dataframe import _compat
 from dask.dataframe._compat import tm, PANDAS_GT_100, PANDAS_GT_110
-from dask.base import compute_as_if_collection
+from dask.base import compute, compute_as_if_collection
 from dask.utils import put_lines, M
 
 from dask.dataframe.core import (
@@ -240,9 +240,27 @@ def test_partition_sizes():
     assert_array_equal(dask_sliced.compute(), np_sliced)
 
 
-def check_partition_sizes(df, partition_sizes):
-    assert df.partition_sizes == partition_sizes
-    assert [ len(partition.compute(scheduler='sync')) for partition in df.partitions ] == partition_sizes
+def check_partition_sizes(df, *args, **kwargs):
+    if args or kwargs:
+        if args:
+            assert len(args) == 1
+            assert not kwargs
+            partition_sizes = args[0]
+        else:
+            assert not args
+            assert 'partition_sizes' in kwargs
+            partition_sizes = kwargs.pop('partition_sizes')
+            assert not kwargs
+        assert df.partition_sizes == partition_sizes
+        if partition_sizes is not None:
+            #df.map_partitions(len)
+            computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
+            actual_sizes = [ len(partition) for partition in computed ]
+            assert actual_sizes == partition_sizes
+    else:
+        computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
+        partition_sizes = [ len(partition) for partition in computed ]
+        assert partition_sizes == df.partition_sizes
 
 
 def test_repartition_sizes():
@@ -1279,9 +1297,10 @@ def test_shape():
     assert_eq(dd.compute(result)[0], (len(full.a),))
 
     sh = dd.from_pandas(pd.DataFrame(index=[1, 2, 3]), npartitions=2).shape
-    assert (sh[0].compute(), sh[1]) == (3, 0)
-    sh = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1).shape
-    assert (sh[0].compute(), sh[1]) == (0, 2)
+    assert sh == (3, 0)
+    ddf = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1)
+    sh = ddf.shape
+    assert sh == (0, 2)
 
 
 def test_nbytes():
@@ -1995,7 +2014,12 @@ def test_repartition_npartitions(use_index, n, k, dtype, transform):
     )
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
+    check_partition_sizes(a)
     b = a.repartition(npartitions=k)
+    if k > n:
+        check_partition_sizes(b, None)
+    else:
+        check_partition_sizes(b)
     assert_eq(a, b)
     assert b.npartitions == k
     parts = dask.get(b.dask, b.__dask_keys__())
