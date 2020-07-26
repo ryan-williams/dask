@@ -261,11 +261,45 @@ def test_iloc():
     check(lambda df: df.iloc[:10])
     check(lambda df: df.iloc[0:10])
 
+    # 2nd partition
     check(lambda df: df.iloc[34:68])
     check(lambda df: df.iloc[35:68])
     check(lambda df: df.iloc[34:67])
     check(lambda df: df.iloc[35:67])
     check(lambda df: df.iloc[40:50])
+
+    # 3rd/last partition:
+    check(lambda df: df.iloc[68:100])
+    check(lambda df: df.iloc[69:100])
+    check(lambda df: df.iloc[68:])
+    check(lambda df: df.iloc[69:])
+    check(lambda df: df.iloc[68:99])
+    check(lambda df: df.iloc[69:99])
+    check(lambda df: df.iloc[68:-1])
+    check(lambda df: df.iloc[69:-1])
+
+    # empty slices
+    check(lambda df: df.iloc[0:0])
+    check(lambda df: df.iloc[1:1])
+    check(lambda df: df.iloc[10:10])
+    check(lambda df: df.iloc[33:33])
+    check(lambda df: df.iloc[34:34])
+    check(lambda df: df.iloc[35:35])
+    check(lambda df: df.iloc[99:99])
+    check(lambda df: df.iloc[100:100])
+    check(lambda df: df.iloc[-1:-1])
+    check(lambda df: df.iloc[-100:-100])
+    check(lambda df: df.iloc[101:101])
+    check(lambda df: df.iloc[200:200])
+    check(lambda df: df.iloc[-101:-101])
+    check(lambda df: df.iloc[-200:-200])
+
+    # across partitions:
+    check(lambda df: df.iloc[10:90])
+    check(lambda df: df.iloc[10:-10])
+    check(lambda df: df.iloc[-90:-10])
+    check(lambda df: df.iloc[1:-1])
+    check(lambda df: df.iloc[-99:99])
 
     # check(lambda df: df.iloc[0])
     # check(lambda df: df.iloc[10])

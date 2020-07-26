@@ -72,12 +72,14 @@ class _iLocIndexer(_IndexerBase):
             if not isinstance(iindexer, slice):
                 raise ValueError("Unexpected iindexer: %s" % str(iindexer))
 
-            start, stop, step = (iindexer.start or 0), (iindexer.stop or obj._len), (iindexer.step or 1)
+            start, stop, step = (iindexer.start or 0), (iindexer.stop if iindexer.stop is not None else obj._len), (iindexer.step or 1)
             if start < 0:
                 start += obj._len
             if stop < 0:
                 stop += obj._len
             m, M = min(start, stop), max(start, stop)
+            m = np.clip(m, 0, _len)
+            M = np.clip(M, 0, _len)
 
             partition_data = [
                 dict(partition_idx=partition_idx, start=start, end=end, m=m, M=M)
@@ -85,6 +87,23 @@ class _iLocIndexer(_IndexerBase):
                 in enumerate(obj.partition_idx_ranges)
                 if start < M and end > m
             ]
+
+            if not partition_data:
+                # The passed slice either begins after obj's end, or is empty and falls at a partition boundary (e.g. 0:0, N:N for N == partition_sizes[0], etc.)
+                if m > _len:
+                    partition_data = [
+                         dict(partition_idx=partition_idx, start=start, end=end, m=m, M=M)
+                         for partition_idx, (start, end)
+                         in list(enumerate(obj.partition_idx_ranges))[-1:]
+                    ]
+                else:
+                    partition_data = [
+                        dict(partition_idx=partition_idx, start=start, end=end, m=m, M=M)
+                        for partition_idx, (start, end)
+                        in enumerate(obj.partition_idx_ranges)
+                        if start <= M and end >= m
+                    ] \
+                    [:1]
 
             first_partition = partition_data[0]
             first_partition_idx = first_partition['partition_idx']
