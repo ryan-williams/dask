@@ -300,7 +300,9 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         self._len = None
 
         if partition_sizes:
-            assert len(partition_sizes) + 1 == len(divisions)
+            if divisions:
+                assert len(partition_sizes) + 1 == len(divisions)
+            self._len = sum(partition_sizes)
         self.partition_sizes = partition_sizes
 
     def __dask_graph__(self):
@@ -457,7 +459,7 @@ Dask Name: {name}, {task} tasks"""
     def index(self, value):
         self.divisions = value.divisions
         result = map_partitions(
-            methods.assign_index, self, value, enforce_metadata=False,  # TODO(ryan): partition_sizes
+            methods.assign_index, self, value, enforce_metadata=False,  # TODO: partition_sizes
         )
         self.dask = result.dask
         self._name = result._name
@@ -542,7 +544,7 @@ Dask Name: {name}, {task} tasks"""
         )
 
     def __len__(self):
-        _len = getattr(self, "_len", None)
+        _len = getattr(self, "_len", None)  # TODO: this should be unnecessary; _len should always be set to None (when unknown)
         if _len is not None:
             return _len
         return self.reduction(
@@ -2278,7 +2280,7 @@ Dask Name: {name}, {task} tasks"""
 
         if axis == 1:
             name = "{0}{1}(axis=1)".format(self._token_prefix, op_name)
-            result = self.map_partitions(chunk, token=name, **chunk_kwargs)
+            result = self.map_partitions(chunk, token=name, **chunk_kwargs, preserve_partitions=True)
             return handle_out(out, result)
         else:
             # cumulate each partitions
@@ -2375,24 +2377,24 @@ Dask Name: {name}, {task} tasks"""
     def where(self, cond, other=np.nan):
         # cond and other may be dask instance,
         # passing map_partitions via keyword will not be aligned
-        return map_partitions(M.where, self, cond, other, enforce_metadata=False)
+        return map_partitions(M.where, self, cond, other, enforce_metadata=False, preserve_partitions=True)
 
     @derived_from(pd.DataFrame)
     def mask(self, cond, other=np.nan):
-        return map_partitions(M.mask, self, cond, other, enforce_metadata=False)
+        return map_partitions(M.mask, self, cond, other, enforce_metadata=False, preserve_partitions=True)
 
     @derived_from(pd.DataFrame)
     def notnull(self):
-        return self.map_partitions(M.notnull, enforce_metadata=False)
+        return self.map_partitions(M.notnull, enforce_metadata=False, preserve_partitions=True)
 
     @derived_from(pd.DataFrame)
     def isnull(self):
-        return self.map_partitions(M.isnull, enforce_metadata=False)
+        return self.map_partitions(M.isnull, enforce_metadata=False, preserve_partitions=True)
 
     @derived_from(pd.DataFrame)
     def isna(self):
         if hasattr(pd, "isna"):
-            return self.map_partitions(M.isna, enforce_metadata=False)
+            return self.map_partitions(M.isna, enforce_metadata=False, preserve_partitions=True)
         else:
             raise NotImplementedError(
                 "Need more recent version of Pandas "
@@ -2414,7 +2416,7 @@ Dask Name: {name}, {task} tasks"""
         # - avoid serializing data in every task
         # - avoid cost of traversal of large list in optimizations
         return self.map_partitions(
-            M.isin, delayed(values), meta=meta, enforce_metadata=False
+            M.isin, delayed(values), meta=meta, enforce_metadata=False, preserve_partitions=True
         )
 
     @derived_from(pd.DataFrame)
@@ -2437,7 +2439,7 @@ Dask Name: {name}, {task} tasks"""
         elif is_categorical_dtype(dtype) and getattr(dtype, "categories", None) is None:
             meta = clear_known_categories(meta)
         return self.map_partitions(
-            M.astype, dtype=dtype, meta=meta, enforce_metadata=False
+            M.astype, dtype=dtype, meta=meta, enforce_metadata=False, preserve_partitions=True
         )
 
     @derived_from(pd.Series)
@@ -2862,7 +2864,7 @@ Dask Name: {name}, {task} tasks""".format(
             res = self if inplace else self.copy()
             res.name = index
         else:
-            res = self.map_partitions(M.rename, index, enforce_metadata=False)
+            res = self.map_partitions(M.rename, index, enforce_metadata=False, preserve_partitions=True)
             if self.known_divisions:
                 if sorted_index and (callable(index) or is_dict_like(index)):
                     old = pd.Series(range(self.npartitions + 1), index=self.divisions)
@@ -2917,11 +2919,13 @@ Dask Name: {name}, {task} tasks""".format(
         return partition_quantiles(self, npartitions, upsample=upsample)
 
     def __getitem__(self, key):
-        if isinstance(key, Series) and self.divisions == key.divisions:
+        if isinstance(key, Series) and self.divisions == key.divisions and self.known_divisions:
             name = "index-%s" % tokenize(self, key)
             dsk = partitionwise_graph(operator.getitem, name, self, key)
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
             return Series(graph, name, self._meta, self.divisions, partition_sizes=self.partition_sizes)
+
+        # TODO: should be possible to implement even when divisions don't match
         raise NotImplementedError(
             "Series getitem in only supported for other series objects "
             "with matching partition structure"
@@ -3592,8 +3596,6 @@ class DataFrame(_Frame):
             dsk = partitionwise_graph(operator.getitem, name, self, key)
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
             result = new_dd_object(graph, name, meta, self.divisions, self.partition_sizes)
-            if self._len:
-                result._len = self._len
             return result
 
         elif isinstance(key, slice):
@@ -4946,6 +4948,7 @@ def handle_out(out, result):
 
         if not isinstance(out, Scalar):
             out.divisions = result.divisions
+            out.partition_sizes = result.partition_sizes
     elif out is not None:
         msg = (
             "The out parameter is not fully supported."
@@ -5460,7 +5463,7 @@ def _rename_dask(df, names):
 
     dsk = partitionwise_graph(_rename, name, metadata, df)
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[df])
-    return new_dd_object(graph, name, metadata, df.divisions)
+    return new_dd_object(graph, name, metadata, df.divisions, partition_sizes=df.partition_sizes)
 
 
 def quantile(df, q, method="default"):
