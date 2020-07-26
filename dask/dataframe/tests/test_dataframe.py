@@ -220,6 +220,7 @@ def test_partition_sizes():
         df.len * 2,
         df.len / 2,
         df.len % 2,
+        df.len % 2 == 0,
     ]:
         assert series.partition_sizes == [34,34,32]
 

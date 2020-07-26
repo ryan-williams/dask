@@ -4833,9 +4833,10 @@ def elemwise(op, *args, **kwargs):
 
     original_args = args
     args = _maybe_align_partitions(args)
+    partitions_already_aligned = args is original_args  # TODO: is this a valid way to test whether partitions were already aligned?
+
     dasks = [arg for arg in args if isinstance(arg, (_Frame, Scalar, Array))]
     dfs = [df for df in dasks if isinstance(df, _Frame)]
-    partitions_already_aligned = args is original_args
 
     # Clean up dask arrays if present
     for i, a in enumerate(dasks):
