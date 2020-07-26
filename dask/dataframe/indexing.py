@@ -42,32 +42,115 @@ class _iLocIndexer(_IndexerBase):
 
     def __getitem__(self, key):
 
-        if isinstance(key, slice) and key == slice(None):
-            key = (slice(None), slice(None))
+        if isinstance(key, slice):
+            key = tuple([key])
 
-        # dataframe
-        msg = (
-            "'DataFrame.iloc' only supports selecting columns. "
-            "It must be used like 'df.iloc[:, column_indexer]'."
-        )
         if not isinstance(key, tuple):
-            raise NotImplementedError(msg)
+            raise ValueError("Expected slice or tuple, got %s" % str(key))
 
-        if len(key) > 2:
-            raise ValueError("Too many indexers")
-
-        iindexer, cindexer = key
-
-        if iindexer != slice(None):
-            raise NotImplementedError(msg)
-
-        if not self.obj.columns.is_unique:
-            # if there are any duplicate column names, do an iloc
-            return self._iloc(iindexer, cindexer)
+        if len(key) == 0:
+            return self.obj
+        elif len(key) == 1:
+            iindexer = key[0]
+            cindexer = slice(None)
+        elif len(key) == 2:
+            iindexer, cindexer = key
         else:
-            # otherwise dispatch to dask.dataframe.core.DataFrame.__getitem__
-            col_names = self.obj.columns[cindexer]
-            return self.obj.__getitem__(col_names)
+            raise ValueError("Expected tuple of length ≤2: %s" % str(key))
+
+        obj = self.obj
+        partition_sizes = obj.partition_sizes
+        if iindexer != slice(None):
+            if not partition_sizes:
+                # TODO: implement for lists/arrays of integers
+                raise NotImplementedError("%s.iloc only supported for `slice`s (on row axis): %s" % (obj.__class__.__name__, iindexer))
+
+            _len = obj._len
+            if isinstance(iindexer, int):
+                iindexer = slice(iindexer, iindexer+1)
+
+            if not isinstance(iindexer, slice):
+                raise ValueError("Unexpected iindexer: %s" % str(iindexer))
+
+            start, stop, step = (iindexer.start or 0), (iindexer.stop or obj._len), (iindexer.step or 1)
+            if start < 0:
+                start += obj._len
+            if stop < 0:
+                stop += obj._len
+            m, M = min(start, stop), max(start, stop)
+
+            partition_data = [
+                dict(partition_idx=partition_idx, start=start, end=end, m=m, M=M)
+                for partition_idx, (start, end)
+                in enumerate(obj.partition_idx_ranges)
+                if start < M and end > m
+            ]
+
+            first_partition = partition_data[0]
+            first_partition_idx = first_partition['partition_idx']
+            first_full_partition_idx = first_partition_idx
+            last_partition = partition_data[-1]
+            last_partition_idx = last_partition['partition_idx']
+            partition_end_idx = last_partition['partition_idx'] + 1
+            last_full_partition_idx = last_partition_idx
+            divisions = obj.divisions[first_partition_idx:(partition_end_idx + 1)]
+            partial_prefix = None
+            partial_suffix = None
+            partition_sizes_prefix = []
+            partition_sizes_suffix = []
+
+            if first_partition['start'] != first_partition['m']:
+                assert first_partition['m'] > first_partition['start']
+                divisions[0] = None
+                first_full_partition_idx += 1
+                skip_elems = first_partition['m'] - first_partition['start']
+                partition_sizes_prefix = [ partition_sizes[first_partition_idx] - skip_elems ]
+                partial_prefix = obj.partitions[first_partition_idx].map_partitions(lambda df, skip_elems: df.iloc[skip_elems:], skip_elems)
+
+            if last_partition['end'] != last_partition['M']:
+                assert last_partition['end'] > last_partition['M']
+                divisions[-1] = None
+                last_full_partition_idx -= 1
+                skip_elems = last_partition['end'] - last_partition['M']
+                partition_sizes_suffix = [ partition_sizes[last_partition_idx] - skip_elems ]
+                partial_suffix = obj.partitions[last_partition_idx].map_partitions(lambda df, skip_elems: df.iloc[:-skip_elems], skip_elems)
+
+            full_partition_idx_range = slice(first_full_partition_idx, last_full_partition_idx + 1)
+            full_partitions = obj.partitions[full_partition_idx_range]
+            new_partition_sizes = partition_sizes_prefix + partition_sizes[full_partition_idx_range] + partition_sizes_suffix
+
+            keys = []
+            if partial_prefix:
+                keys.append((partial_prefix._name, 0))
+            keys += [
+                (obj._name, first_full_partition_idx + idx)
+                for idx in range(len(full_partitions))
+            ]
+            if partial_suffix:
+                keys.append((partial_suffix._name, 0))
+
+            name = 'iloc-%s' % tokenize(obj, key)
+            dsk = { (name, idx): key for idx, key in enumerate(keys) }
+            meta = obj._meta
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
+            row_sliced = new_dd_object(graph, name, meta=meta, divisions=divisions, partition_sizes=new_partition_sizes)
+            return row_sliced.iloc[:, cindexer]
+        else:
+            from dask.dataframe import DataFrame
+            if not isinstance(obj, DataFrame):
+                raise NotImplementedError(
+                    "'DataFrame.iloc' with unknown partition sizes not supported. "
+                    "`partition_sizes` must be computed/set ahead of time, or propagated from an "
+                    "upstream DataFrame or Series, in order to call `iloc`."
+                )
+
+            if not obj.columns.is_unique:
+                # if there are any duplicate column names, do an iloc
+                return self._iloc(iindexer, cindexer)
+            else:
+                # otherwise dispatch to dask.dataframe.core.DataFrame.__getitem__
+                col_names = obj.columns[cindexer]
+                return obj.__getitem__(col_names)
 
     def _iloc(self, iindexer, cindexer):
         assert iindexer == slice(None)

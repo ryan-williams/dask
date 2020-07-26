@@ -229,6 +229,14 @@ def test_partition_sizes():
     assert evens[evens].partition_sizes == [34,34,32]
 
 
+def test_iloc():
+    df = pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ])
+    ddf = dd.from_pandas(df, npartitions=3)
+    assert ddf.partition_sizes == [34,34,32]
+    from pandas.testing import assert_frame_equal
+    assert_frame_equal(ddf.iloc[:100].compute(), df)
+
+
 def test_column_names():
     tm.assert_index_equal(d.columns, pd.Index(["a", "b"]))
     tm.assert_index_equal(d[["b", "a"]].columns, pd.Index(["b", "a"]))

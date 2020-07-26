@@ -351,6 +351,24 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         )
 
     @property
+    def partition_idx_starts(self):
+        if self.partition_sizes:
+            return [0] + np.cumsum(self.partition_sizes)[:-1].tolist()
+        else:
+            return None
+
+    @property
+    def partition_idx_ranges(self):
+        if self.partition_sizes:
+            partition_ends = np.cumsum(self.partition_sizes).tolist()
+            return zip(
+                [0] + partition_ends[:-1],
+                partition_ends,
+            )
+        else:
+            return None
+
+    @property
     def _meta_nonempty(self):
         """ A non-empty version of `_meta` with fake data."""
         return meta_nonempty(self._meta)
