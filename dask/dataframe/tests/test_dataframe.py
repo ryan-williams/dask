@@ -244,7 +244,22 @@ def test_iloc():
     ddf = dd.from_pandas(df, npartitions=3)
     assert ddf.partition_sizes == [34,34,32]
     from pandas.testing import assert_frame_equal
-    assert_frame_equal(ddf.iloc[:100].compute(), df)
+
+    def check(fn):
+        assert_frame_equal(fn(ddf).compute(scheduler='sync'), fn(df))
+
+    check(lambda df: df.iloc[:100])
+    check(lambda df: df.iloc[:])
+    check(lambda df: df.iloc[0:100])
+
+    check(lambda df: df.iloc[:34])
+    check(lambda df: df.iloc[0:34])
+    check(lambda df: df.iloc[10:34])
+
+    check(lambda df: df.iloc[10:24])
+
+    check(lambda df: df.iloc[:10])
+    check(lambda df: df.iloc[0:10])
 
 
 def test_column_names():

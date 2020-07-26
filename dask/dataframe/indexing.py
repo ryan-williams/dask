@@ -89,50 +89,70 @@ class _iLocIndexer(_IndexerBase):
             first_partition = partition_data[0]
             first_partition_idx = first_partition['partition_idx']
             first_full_partition_idx = first_partition_idx
+
             last_partition = partition_data[-1]
             last_partition_idx = last_partition['partition_idx']
-            partition_end_idx = last_partition['partition_idx'] + 1
             last_full_partition_idx = last_partition_idx
-            divisions = obj.divisions[first_partition_idx:(partition_end_idx + 1)]
+
+            partition_end_idx = last_partition_idx + 1
+            divisions = list(obj.divisions[first_partition_idx:(partition_end_idx + 1)])
+
             partial_prefix = None
             partial_suffix = None
             partition_sizes_prefix = []
             partition_sizes_suffix = []
 
-            if first_partition['start'] != first_partition['m']:
-                assert first_partition['m'] > first_partition['start']
+            assert first_partition['start'] <= first_partition['m']
+            has_partial_prefix = first_partition['start'] < first_partition['m']
+
+            assert last_partition['end'] >= last_partition['M']
+            has_partial_suffix = last_partition['end'] > last_partition['M']
+
+            has_clipped_single_partition = has_partial_prefix and has_partial_suffix and first_partition_idx == last_partition_idx
+
+            if has_partial_prefix:
                 divisions[0] = None
                 first_full_partition_idx += 1
-                skip_elems = first_partition['m'] - first_partition['start']
-                partition_sizes_prefix = [ partition_sizes[first_partition_idx] - skip_elems ]
-                partial_prefix = obj.partitions[first_partition_idx].map_partitions(lambda df, skip_elems: df.iloc[skip_elems:], skip_elems)
+                start = first_partition['m'] - first_partition['start']
+                end = min(first_partition['end'], first_partition['M'])
+                drop_right = first_partition['end'] - end
+                partition_sizes_prefix = [ partition_sizes[first_partition_idx] - start - drop_right ]
+                partial_prefix = obj.partitions[first_partition_idx].map_partitions(lambda df, start, end: df.iloc[start:end], start, end)
 
             if last_partition['end'] != last_partition['M']:
-                assert last_partition['end'] > last_partition['M']
                 divisions[-1] = None
                 last_full_partition_idx -= 1
-                skip_elems = last_partition['end'] - last_partition['M']
-                partition_sizes_suffix = [ partition_sizes[last_partition_idx] - skip_elems ]
-                partial_suffix = obj.partitions[last_partition_idx].map_partitions(lambda df, skip_elems: df.iloc[:-skip_elems], skip_elems)
+                if not has_clipped_single_partition:
+                    end = last_partition['end'] - last_partition['M']
+                    partition_sizes_suffix = [ partition_sizes[last_partition_idx] - end ]
+                    partial_suffix = obj.partitions[last_partition_idx].map_partitions(lambda df, end: df.iloc[:-end], end)
 
             full_partition_idx_range = slice(first_full_partition_idx, last_full_partition_idx + 1)
-            full_partitions = obj.partitions[full_partition_idx_range]
+            num_full_partitions = max(0, last_full_partition_idx + 1 - first_full_partition_idx)
             new_partition_sizes = partition_sizes_prefix + partition_sizes[full_partition_idx_range] + partition_sizes_suffix
 
             keys = []
-            if partial_prefix:
+            dependencies = []
+
+            if partial_prefix is not None:
                 keys.append((partial_prefix._name, 0))
-            keys += [
-                (obj._name, first_full_partition_idx + idx)
-                for idx in range(len(full_partitions))
-            ]
-            if partial_suffix:
+                dependencies.append(partial_prefix)
+
+            if num_full_partitions:
+                keys += [
+                    (obj._name, first_full_partition_idx + idx)
+                    for idx in range(num_full_partitions)
+                ]
+                dependencies.append(obj)
+
+            if partial_suffix is not None:
                 keys.append((partial_suffix._name, 0))
+                dependencies.append(partial_suffix)
 
             name = 'iloc-%s' % tokenize(obj, key)
             dsk = { (name, idx): key for idx, key in enumerate(keys) }
             meta = obj._meta
-            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=dependencies)
             row_sliced = new_dd_object(graph, name, meta=meta, divisions=divisions, partition_sizes=new_partition_sizes)
             return row_sliced.iloc[:, cindexer]
         else:
