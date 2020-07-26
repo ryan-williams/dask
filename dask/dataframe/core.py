@@ -2921,7 +2921,7 @@ Dask Name: {name}, {task} tasks""".format(
             name = "index-%s" % tokenize(self, key)
             dsk = partitionwise_graph(operator.getitem, name, self, key)
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
-            return Series(graph, name, self._meta, self.divisions)
+            return Series(graph, name, self._meta, self.divisions, partition_sizes=self.partition_sizes)
         raise NotImplementedError(
             "Series getitem in only supported for other series objects "
             "with matching partition structure"

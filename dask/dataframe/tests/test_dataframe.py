@@ -226,6 +226,7 @@ def test_partition_sizes():
 
     evens = df.len % 2 == 0
     assert df[evens].partition_sizes == [34,34,32]
+    assert evens[evens].partition_sizes == [34,34,32]
 
 
 def test_column_names():
