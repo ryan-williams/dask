@@ -228,15 +228,45 @@ def test_partition_sizes():
     assert df[evens].partition_sizes == [34,34,32]
     assert evens[evens].partition_sizes == [34,34,32]
 
-    # from dask.array import from_array
-    # from numpy import array
-    # a = array(range(77)).reshape((7,11))
-    # d = from_array(a, chunks=(3,2))
-    # assert d.chunks == ((3,3,1), (2,2,2,2,2,1))
-    # from numpy.testing import assert_array_equal
-    # dask_sliced = d[evens]
-    # np_sliced = a[evens.compute()]
-    # assert_array_equal(dask_sliced.compute(), np_sliced)
+    # def test_array_series_slice():
+    from dask.array import from_array
+    from numpy import array
+    a = array(range(77)).reshape((7,11))
+    d = from_array(a, chunks=(3,2))
+    assert d.chunks == ((3,3,1), (2,2,2,2,2,1))
+    from numpy.testing import assert_array_equal
+    dask_sliced = d[evens]
+    np_sliced = a[evens.compute()]
+    assert_array_equal(dask_sliced.compute(), np_sliced)
+
+
+def check_partition_sizes(df, partition_sizes):
+    assert df.partition_sizes == partition_sizes
+    assert [ len(partition.compute(scheduler='sync')) for partition in df.partitions ] == partition_sizes
+
+
+def test_repartition_sizes():
+    df = dd.from_pandas(pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ]), npartitions=3)
+    check_partition_sizes(df, [34,34,32])
+    df["len"] = df.i.map(len)
+    assert df.partition_sizes == [34,34,32]
+    assert df['len'].partition_sizes == [34,34,32]
+    assert df['i'].partition_sizes == [34,34,32]
+    assert len(df.compute()) == 100
+
+    evens = df.len % 2 == 0
+    assert df[evens].partition_sizes == [34,34,32]
+    assert evens[evens].partition_sizes == [34,34,32]
+
+    df2 = df.repartition(partition_sizes=[40,40,20])
+    from pandas.testing import assert_frame_equal
+    assert_frame_equal(df.compute(), df2.compute())
+    check_partition_sizes(df2, [40,40,20])
+
+    df3 = df.repartition(partition_sizes=[10]*10)
+    from pandas.testing import assert_frame_equal
+    assert_frame_equal(df.compute(), df3.compute())
+    check_partition_sizes(df3, [10]*10)
 
 
 def test_iloc():

@@ -3164,7 +3164,7 @@ Dask Name: {name}, {task} tasks""".format(
 
     @derived_from(pd.Series)
     def to_frame(self, name=None):
-        return self.map_partitions(M.to_frame, name, meta=self._meta.to_frame(name))
+        return self.map_partitions(M.to_frame, name, meta=self._meta.to_frame(name), preserve_partitions=True)
 
     @derived_from(pd.Series)
     def to_string(self, max_rows=5):
@@ -6058,11 +6058,19 @@ def repartition_sizes(df, sizes):
     if cur_len != nxt_len:
         raise ValueError("Current len %d != new len %d" % (cur_len, nxt_len))
 
-    new_idxs = np.cumsum(sizes)
+    new_idxs = [0] + np.cumsum(sizes).tolist()
 
-    slices = [ df.iloc[new_idxs[i]:new_idxs[i+1]] for i in range(len(sizes)) ]
-    from dask.dataframe import from_delayed
-    return from_delayed(slices, meta=df.meta)
+    slices = [
+        df \
+            .iloc[new_idxs[i]:new_idxs[i+1]] \
+            .repartition(npartitions=1)
+        for i in range(len(sizes))
+    ]
+    from dask.dataframe import concat
+    result = concat(slices)
+    result.partition_sizes = sizes  # TODO: push this into the concat machinery
+    result._len = sum(sizes)
+    return result
 
 
 def total_mem_usage(df, index=True, deep=False):

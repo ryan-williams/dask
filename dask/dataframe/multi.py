@@ -907,7 +907,12 @@ def concat_indexed_dataframes(dfs, axis=0, join="outer", **kwargs):
     for df in dfs2:
         dsk.update(df.dask)
 
-    return new_dd_object(dsk, name, meta, divisions)
+    if len(set([ df.divisions for df in dfs ])) == 1 and len(set([ df.partition_sizes for df in dfs ])) == 1:
+        partition_sizes = dfs[0].partition_sizes
+        assert dfs[0].divisions == dfs2[0].divisions
+    else:
+        partition_sizes = None
+    return new_dd_object(dsk, name, meta, divisions, partition_sizes=partition_sizes)
 
 
 def stack_partitions(dfs, divisions, join="outer", **kwargs):
