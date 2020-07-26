@@ -3646,14 +3646,18 @@ class DataFrame(_Frame):
 
         if isinstance(key, Series):
             # do not perform dummy calculation, as columns will not be changed.
-            #
-            if self.divisions != key.divisions:
+            partitions_aligned = self.divisions == key.divisions
+            if not partitions_aligned:
                 from .multi import _maybe_align_partitions
 
                 self, key = _maybe_align_partitions([self, key])
             dsk = partitionwise_graph(operator.getitem, name, self, key)
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
-            return new_dd_object(graph, name, self, self.divisions, None)
+            if partitions_aligned:
+                partition_sizes = self.partition_sizes
+            else:
+                partition_sizes = None
+            return new_dd_object(graph, name, self, self.divisions, partition_sizes=partition_sizes)
         raise NotImplementedError(key)
 
     def __setitem__(self, key, value):

@@ -224,6 +224,9 @@ def test_partition_sizes():
     ]:
         assert series.partition_sizes == [34,34,32]
 
+    evens = df.len % 2 == 0
+    assert df[evens].partition_sizes == [34,34,32]
+
 
 def test_column_names():
     tm.assert_index_equal(d.columns, pd.Index(["a", "b"]))
