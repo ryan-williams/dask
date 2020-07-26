@@ -50,17 +50,20 @@ class _iLocIndexer(_IndexerBase):
         if not isinstance(key, tuple):
             raise ValueError("Expected slice or tuple, got %s" % str(key))
 
+        obj = self.obj
+
         if len(key) == 0:
-            return self.obj
+            return obj
         elif len(key) == 1:
             iindexer = key[0]
             cindexer = slice(None)
         elif len(key) == 2:
+            if isinstance(obj, Series):
+                raise ValueError("Can't slice Series on 2 axes: %s" % str(key))
             iindexer, cindexer = key
         else:
             raise ValueError("Expected tuple of length ≤2: %s" % str(key))
 
-        obj = self.obj
         partition_sizes = obj.partition_sizes
         if iindexer != slice(None):
             if not partition_sizes:
@@ -183,8 +186,13 @@ class _iLocIndexer(_IndexerBase):
             meta = obj._meta
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=dependencies)
             row_sliced = new_dd_object(graph, name, meta=meta, divisions=divisions, partition_sizes=new_partition_sizes)
-            return row_sliced.iloc[:, cindexer]
+            if cindexer == slice(None):
+                return row_sliced
+            else:
+                return row_sliced.iloc[:, cindexer]
         else:
+            if cindexer == slice(None):
+                return obj
             from dask.dataframe import DataFrame
             if not isinstance(obj, DataFrame):
                 raise NotImplementedError(
