@@ -231,9 +231,9 @@ def test_partition_sizes():
     # def test_array_series_slice():
     from dask.array import from_array
     from numpy import array
-    a = array(range(77)).reshape((7,11))
-    d = from_array(a, chunks=(3,2))
-    assert d.chunks == ((3,3,1), (2,2,2,2,2,1))
+    a = array(range(1100)).reshape((100,11))
+    d = from_array(a, chunks=(23,4))
+    assert d.chunks == ((23,23,23,23,8), (4,4,3))
     from numpy.testing import assert_array_equal
     dask_sliced = d[evens]
     np_sliced = a[evens.compute()]
