@@ -214,6 +214,15 @@ def test_partition_sizes():
     assert len(df.compute()) == 100
     assert [ len(partition.compute(scheduler='single-threaded')) for partition in df.partitions ] == [34,34,32]
 
+    for series in [
+        df.len + 2,
+        df.len - 2,
+        df.len * 2,
+        df.len / 2,
+        df.len % 2,
+    ]:
+        assert series.partition_sizes == [34,34,32]
+
 
 def test_column_names():
     tm.assert_index_equal(d.columns, pd.Index(["a", "b"]))
