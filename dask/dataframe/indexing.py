@@ -41,6 +41,8 @@ class _iLocIndexer(_IndexerBase):
         return self.obj._meta.iloc
 
     def __getitem__(self, key):
+        if isinstance(key, int):
+            key = slice(key, key+1)
 
         if isinstance(key, slice):
             key = tuple([key])
@@ -66,8 +68,6 @@ class _iLocIndexer(_IndexerBase):
                 raise NotImplementedError("%s.iloc only supported for `slice`s (on row axis): %s" % (obj.__class__.__name__, iindexer))
 
             _len = obj._len
-            if isinstance(iindexer, int):
-                iindexer = slice(iindexer, iindexer+1)
 
             if not isinstance(iindexer, slice):
                 raise ValueError("Unexpected iindexer: %s" % str(iindexer))
@@ -117,7 +117,17 @@ class _iLocIndexer(_IndexerBase):
                 end = min(first_partition['end'], first_partition['M'])
                 drop_right = first_partition['end'] - end
                 partition_sizes_prefix = [ partition_sizes[first_partition_idx] - start - drop_right ]
-                partial_prefix = obj.partitions[first_partition_idx].map_partitions(lambda df, start, end: df.iloc[start:end], start, end)
+                partial_prefix = \
+                    obj \
+                        .partitions[first_partition_idx] \
+                        .map_partitions(
+                            lambda df, start, drop_right: \
+                                df.iloc[start:-drop_right] \
+                                if drop_right \
+                                else df.iloc[start:],
+                            start,
+                            drop_right
+                        )
 
             if last_partition['end'] != last_partition['M']:
                 divisions[-1] = None

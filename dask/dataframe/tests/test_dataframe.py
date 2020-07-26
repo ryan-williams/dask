@@ -261,6 +261,17 @@ def test_iloc():
     check(lambda df: df.iloc[:10])
     check(lambda df: df.iloc[0:10])
 
+    check(lambda df: df.iloc[34:68])
+    check(lambda df: df.iloc[35:68])
+    check(lambda df: df.iloc[34:67])
+    check(lambda df: df.iloc[35:67])
+    check(lambda df: df.iloc[40:50])
+
+    # check(lambda df: df.iloc[0])
+    # check(lambda df: df.iloc[10])
+    # check(lambda df: df.iloc[34])
+    # check(lambda df: df.iloc[-1])
+
 
 def test_column_names():
     tm.assert_index_equal(d.columns, pd.Index(["a", "b"]))
