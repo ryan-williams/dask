@@ -1513,7 +1513,6 @@ class Array(DaskMethodsMixin):
     def __getitem__(self, index):
         from dask.dataframe import Series
         if isinstance(index, Series):
-            # if is_dask_collection(index):
             self_type = '%s.%s' % (self.__class__.__module__, self.__class__.__name__)
             index_type = '%s.%s' % (index.__class__.__module__, index.__class__.__name__)
             if index_type != 'dask.dataframe.core.Series':
@@ -1527,17 +1526,6 @@ class Array(DaskMethodsMixin):
             partition_sizes = self.chunks[0]
             series = index.repartition(partition_sizes=partition_sizes)
             return self[series.to_dask_array(lengths=True)]
-            # dsk = {}
-            # name = 'slice-%s' % tokenize(self, index)
-            # enumerated_chunks = product(*(enumerate(bds) for bds in self.chunks))
-            # for idx, chunk_shape in (zip(*ec) for ec in enumerated_chunks):
-            #     series_key = (series._name, idx[0])
-            #     old_key = (self._name,) + idx
-            #     new_key = (name,) + idx
-            #     dsk[new_key] = (np.ndarray.__getitem__, old_key, series_key)
-            #
-            # graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, series])
-            # return Array(graph, name, None, dtype=self.dtype)
 
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (
