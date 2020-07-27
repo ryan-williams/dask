@@ -1841,18 +1841,27 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.abs, self)
 
     def __add__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.add, self, other)
 
     def __radd__(self, other):
         return elemwise(operator.add, other, self)
 
     def __and__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.and_, self, other)
 
     def __rand__(self, other):
         return elemwise(operator.and_, other, self)
 
     def __div__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.div, self, other)
 
     def __rdiv__(self, other):
@@ -1883,12 +1892,18 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.le, self, other)
 
     def __mod__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mod, self, other)
 
     def __rmod__(self, other):
         return elemwise(operator.mod, other, self)
 
     def __mul__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mul, self, other)
 
     def __rmul__(self, other):
@@ -1901,15 +1916,21 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.neg, self)
 
     def __or__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.or_, self, other)
-
-    def __pos__(self):
-        return self
 
     def __ror__(self, other):
         return elemwise(operator.or_, other, self)
 
+    def __pos__(self):
+        return self
+
     def __pow__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.pow, self, other)
 
     def __rpow__(self, other):
@@ -1922,30 +1943,45 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.rshift, other, self)
 
     def __sub__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.sub, self, other)
 
     def __rsub__(self, other):
         return elemwise(operator.sub, other, self)
 
     def __truediv__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.truediv, self, other)
 
     def __rtruediv__(self, other):
         return elemwise(operator.truediv, other, self)
 
     def __floordiv__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.floordiv, self, other)
 
     def __rfloordiv__(self, other):
         return elemwise(operator.floordiv, other, self)
 
     def __xor__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.xor, self, other)
 
     def __rxor__(self, other):
         return elemwise(operator.xor, other, self)
 
     def __matmul__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .routines import matmul
 
         return matmul(self, other)
@@ -1956,6 +1992,9 @@ class Array(DaskMethodsMixin):
         return matmul(other, self)
 
     def __divmod__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .ufunc import divmod
 
         return divmod(self, other)
