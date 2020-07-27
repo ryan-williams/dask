@@ -3133,23 +3133,23 @@ def test_reset_index():
 
     sol = df.reset_index()
     res = ddf.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.reset_index(drop=True)
     res = ddf.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.x.reset_index()
     res = ddf.x.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.x.reset_index(drop=True)
     res = ddf.x.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
 
 def test_dataframe_compute_forward_kwargs():

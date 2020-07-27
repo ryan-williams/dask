@@ -931,7 +931,9 @@ def concat_indexed_dataframes(dfs, axis=0, join="outer", **kwargs):
     for df in dfs2:
         dsk.update(df.dask)
 
-    if len(set([ df.divisions for df in dfs ])) == 1 and len(set([ df.partition_sizes for df in dfs ])) == 1:
+    if \
+        len(set([ tuple(df.divisions) for df in dfs if df.divisions is not None ])) == 1 and \
+        len(set([ tuple(df.partition_sizes) for df in dfs if df.partition_sizes is not None ])) == 1:
         partition_sizes = dfs[0].partition_sizes
         assert dfs[0].divisions == dfs2[0].divisions
     else:
