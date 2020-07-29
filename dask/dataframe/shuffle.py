@@ -931,7 +931,7 @@ def compute_and_set_divisions(df, **kwargs):
     mins = df.index.map_partitions(M.min, meta=df.index)
     maxes = df.index.map_partitions(M.max, meta=df.index)
     lens = df.index.map_partitions(len, meta=df.index)
-    mins, maxes = compute(mins, maxes, **kwargs)
+    mins, maxes, lens = compute(mins, maxes, lens, **kwargs)
 
     if (
         sorted(mins) != list(mins)
@@ -944,6 +944,7 @@ def compute_and_set_divisions(df, **kwargs):
 
     df.divisions = tuple(mins) + (list(maxes)[-1],)
     df.partition_sizes = tuple(lens)
+    df._len = sum(df.partition_sizes)
     overlap = [i for i in range(1, len(mins)) if mins[i] >= maxes[i - 1]]  # TODO: is this >= backwards…?
     return fix_overlap(df, overlap) if overlap else df
 
