@@ -299,7 +299,7 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         self.divisions = tuple(divisions)
         self._len = None  # TODO: this should probably be a @property (derived from partition_sizes, not pickled / included in *args, etc.)
 
-        if partition_sizes:
+        if partition_sizes is not None:
             if divisions:
                 if len(partition_sizes) + 1 != len(divisions):
                     raise AssertionError("partition_sizes len %d doesn't correspond to divisions len %d" % (len(partition_sizes), len(divisions)))
@@ -1489,7 +1489,12 @@ Dask Name: {name}, {task} tasks"""
         Returns
         -------
         """
-        if lengths is True:
+        if self.partition_sizes:
+            if isinstance(lengths, bool):
+                lengths = self.partition_sizes
+            else:
+                return self.repartition(partition_sizes=lengths).to_dask_array(lengths=True)
+        elif lengths is True:
             lengths = tuple(self.map_partitions(len, enforce_metadata=False).compute())
 
         arr = self.values
