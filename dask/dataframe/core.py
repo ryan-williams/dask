@@ -3690,19 +3690,8 @@ class DataFrame(_Frame):
             return new_dd_object(graph, name, meta, self.divisions, self.partition_sizes)
 
         if isinstance(key, Series):
-            # do not perform dummy calculation, as columns will not be changed.
-            partitions_aligned = self.divisions == key.divisions
-            if not partitions_aligned:
-                from .multi import _maybe_align_partitions
+            return map_pairwise(op=operator.getitem, df=self, series=key)
 
-                self, key = _maybe_align_partitions([self, key])
-            dsk = partitionwise_graph(operator.getitem, name, self, key)
-            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
-            if partitions_aligned:
-                partition_sizes = self.partition_sizes
-            else:
-                partition_sizes = None
-            return new_dd_object(graph, name, self, self.divisions, partition_sizes=partition_sizes)
         raise NotImplementedError(key)
 
     def __setitem__(self, key, value):
@@ -6849,3 +6838,19 @@ def series_map(base_series, map_series):
     divisions = list(base_series.divisions)
 
     return new_dd_object(graph, final_prefix, meta, divisions)
+
+
+def map_pairwise(op, df: DataFrame, series: Series):
+    # do not perform dummy calculation, as columns will not be changed.
+    partitions_aligned = df.divisions == series.divisions
+    if not partitions_aligned:
+        from .multi import _maybe_align_partitions
+
+        df, series = _maybe_align_partitions([df, series])
+    dsk = partitionwise_graph(op, name, df, series)
+    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[df, series])
+    if partitions_aligned:
+        partition_sizes = df.partition_sizes
+    else:
+        partition_sizes = None
+    return new_dd_object(graph, name, df, df.divisions, partition_sizes=partition_sizes)

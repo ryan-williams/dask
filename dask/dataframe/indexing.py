@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 import dask.dataframe as dd
-from .core import new_dd_object, Series, partitionwise_graph
+from .core import new_dd_object, Series, partitionwise_graph, Index
 from ..array.core import Array
 from .utils import is_index_like, meta_nonempty
 from . import methods
@@ -45,12 +45,11 @@ class _iLocIndexer(_IndexerBase):
         if isinstance(key, int):
             key = slice(key, key+1)
 
-        if isinstance(key, slice):
+        if isinstance(key, (slice, Index, Series)):
             key = tuple([key])
 
         if not isinstance(key, tuple):
-            # raise ValueError("Expected slice or tuple, got %s" % str(key))
-            key = (key,)
+            raise ValueError("Expected slice or tuple or Dask Index, got %s" % str(key))
 
         obj = self.obj
 
