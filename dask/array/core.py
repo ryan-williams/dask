@@ -1513,7 +1513,6 @@ class Array(DaskMethodsMixin):
     def __getitem__(self, index):
         from dask.dataframe import Series
         if isinstance(index, Series):
-            # if is_dask_collection(index):
             self_type = '%s.%s' % (self.__class__.__module__, self.__class__.__name__)
             index_type = '%s.%s' % (index.__class__.__module__, index.__class__.__name__)
             if index_type != 'dask.dataframe.core.Series':
@@ -1527,17 +1526,6 @@ class Array(DaskMethodsMixin):
             partition_sizes = self.chunks[0]
             series = index.repartition(partition_sizes=partition_sizes)
             return self[series.to_dask_array(lengths=True)]
-            # dsk = {}
-            # name = 'slice-%s' % tokenize(self, index)
-            # enumerated_chunks = product(*(enumerate(bds) for bds in self.chunks))
-            # for idx, chunk_shape in (zip(*ec) for ec in enumerated_chunks):
-            #     series_key = (series._name, idx[0])
-            #     old_key = (self._name,) + idx
-            #     new_key = (name,) + idx
-            #     dsk[new_key] = (np.ndarray.__getitem__, old_key, series_key)
-            #
-            # graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, series])
-            # return Array(graph, name, None, dtype=self.dtype)
 
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (
@@ -1851,18 +1839,27 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.abs, self)
 
     def __add__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.add, self, other)
 
     def __radd__(self, other):
         return elemwise(operator.add, other, self)
 
     def __and__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.and_, self, other)
 
     def __rand__(self, other):
         return elemwise(operator.and_, other, self)
 
     def __div__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.div, self, other)
 
     def __rdiv__(self, other):
@@ -1893,12 +1890,18 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.le, self, other)
 
     def __mod__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mod, self, other)
 
     def __rmod__(self, other):
         return elemwise(operator.mod, other, self)
 
     def __mul__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mul, self, other)
 
     def __rmul__(self, other):
@@ -1911,15 +1914,21 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.neg, self)
 
     def __or__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.or_, self, other)
-
-    def __pos__(self):
-        return self
 
     def __ror__(self, other):
         return elemwise(operator.or_, other, self)
 
+    def __pos__(self):
+        return self
+
     def __pow__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.pow, self, other)
 
     def __rpow__(self, other):
@@ -1932,30 +1941,45 @@ class Array(DaskMethodsMixin):
         return elemwise(operator.rshift, other, self)
 
     def __sub__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.sub, self, other)
 
     def __rsub__(self, other):
         return elemwise(operator.sub, other, self)
 
     def __truediv__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.truediv, self, other)
 
     def __rtruediv__(self, other):
         return elemwise(operator.truediv, other, self)
 
     def __floordiv__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.floordiv, self, other)
 
     def __rfloordiv__(self, other):
         return elemwise(operator.floordiv, other, self)
 
     def __xor__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.xor, self, other)
 
     def __rxor__(self, other):
         return elemwise(operator.xor, other, self)
 
     def __matmul__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .routines import matmul
 
         return matmul(self, other)
@@ -1966,6 +1990,9 @@ class Array(DaskMethodsMixin):
         return matmul(other, self)
 
     def __divmod__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .ufunc import divmod
 
         return divmod(self, other)
