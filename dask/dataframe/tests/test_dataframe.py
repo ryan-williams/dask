@@ -2740,7 +2740,7 @@ def test_to_dask_array_raises(as_frame):
         a.to_dask_array(5)
 
 
-@pytest.mark.parametrize("as_frame", [False, False])
+@pytest.mark.parametrize("as_frame", [False, True])
 def test_to_dask_array_unknown(as_frame):
     s = pd.Series([1, 2, 3, 4, 5], name="foo")
     a = dd.from_pandas(s, chunksize=2)
@@ -2750,16 +2750,12 @@ def test_to_dask_array_unknown(as_frame):
 
     result = a.to_dask_array()
     assert isinstance(result, da.Array)
-    result = result.chunks
+    chunks = result.chunks
 
     if as_frame:
-        assert result[1] == (1,)
-
-    assert len(result) == 1
-    result = result[0]
-
-    assert len(result) == 2
-    assert all(np.isnan(x) for x in result)
+        assert chunks == ((2,3),(1,))
+    else:
+        assert chunks == ((2,3),)
 
 
 @pytest.mark.parametrize("lengths", [[2, 3], True])
@@ -3133,23 +3129,23 @@ def test_reset_index():
 
     sol = df.reset_index()
     res = ddf.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.reset_index(drop=True)
     res = ddf.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.x.reset_index()
     res = ddf.x.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.x.reset_index(drop=True)
     res = ddf.x.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
 
 def test_dataframe_compute_forward_kwargs():
@@ -4178,11 +4174,22 @@ def test_mixed_dask_array_operations():
     df = pd.DataFrame({"x": [1, 2, 3]}, index=[4, 5, 6])
     ddf = dd.from_pandas(df, npartitions=2)
 
-    assert_eq(df.x + df.x.values, ddf.x + ddf.x.values)
-    assert_eq(df.x.values + df.x, ddf.x.values + ddf.x)
+    x = ddf.x
+    v = x.values
+    chunks = v.chunks
+    assert chunks == ((3,),)
+
+    l = df.x + df.x.values
+    r = x + v
+    assert_eq(l, r)
+    l = df.x.values + df.x
+    r = v + x
+    assert_eq(l, r)
 
     assert_eq(df.x + df.index.values, ddf.x + ddf.index.values)
-    assert_eq(df.index.values + df.x, ddf.index.values + ddf.x)
+    l = df.index.values + df.x
+    r = ddf.index.values + ddf.x
+    assert_eq(l, r)
 
     assert_eq(df.x + df.x.values.sum(), ddf.x + ddf.x.values.sum())
 

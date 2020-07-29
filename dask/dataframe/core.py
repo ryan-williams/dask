@@ -297,12 +297,12 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
             )
         self._meta = meta
         self.divisions = tuple(divisions)
-        self._len = None
+        self._len = None  # TODO: this should probably be a @property (derived from partition_sizes, not pickled / included in *args, etc.)
 
         if partition_sizes:
             if divisions:
                 if len(partition_sizes) + 1 != len(divisions):
-                    raise ValueError("partition_sizes len %d doesn't correspond to divisions len %d" % (len(partition_sizes), len(divisions)))
+                    raise AssertionError("partition_sizes len %d doesn't correspond to divisions len %d" % (len(partition_sizes), len(divisions)))
             self._len = sum(partition_sizes)
         self.partition_sizes = partition_sizes
 
@@ -354,7 +354,7 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
     @property
     def partition_idx_starts(self):
         if self.partition_sizes:
-            return [0] + np.cumsum(self.partition_sizes)[:-1].tolist()
+            return tuple([0] + np.cumsum(self.partition_sizes)[:-1].tolist())
         else:
             return None
 
@@ -376,13 +376,14 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
 
     @property
     def _args(self):
-        return (self.dask, self._name, self._meta, self.divisions)
+        return (self.dask, self._name, self._meta, self.divisions, self.partition_sizes)
 
     def __getstate__(self):
         return self._args
 
     def __setstate__(self, state):
-        self.dask, self._name, self._meta, self.divisions = state
+        self.dask, self._name, self._meta, self.divisions, self.partition_sizes = state
+        self._len = sum(self.partition_sizes) if self.partition_sizes is not None else None
 
     def copy(self):
         """ Make a copy of the dataframe
@@ -390,9 +391,7 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         This is strictly a shallow copy of the underlying computational graph.
         It does not affect the underlying data
         """
-        result = new_dd_object(self.dask, self._name, self._meta, self.divisions, self.partition_sizes)
-        result._len = self._len
-        return result
+        return new_dd_object(self.dask, self._name, self._meta, self.divisions, self.partition_sizes)
 
     def __array__(self, dtype=None, **kwargs):
         self._computed = self.compute()
@@ -507,8 +506,29 @@ Dask Name: {name}, {task} tasks"""
         result = self.map_partitions(
             M.reset_index, drop=drop, enforce_metadata=False, preserve_partitions=True,
         )
-        if result.partition_sizes:
-            result.divisions = result.partition_starts + (result._len - 1,)
+        partition_sizes = result.partition_sizes
+        if partition_sizes:
+            name = 'default-index-%s' % tokenize(partition_sizes)
+            _len = result._len
+            partition_idx_starts = result.partition_idx_starts
+            divisions = partition_idx_starts + (_len - 1,)
+
+            from pandas import RangeIndex
+            meta = RangeIndex(0, 0)
+
+            partition_idx_ranges = result.partition_idx_ranges
+            dsk = HighLevelGraph.from_collections(name, {
+                (name, idx): RangeIndex(start, end)
+                for idx, (start, end)
+                in enumerate(partition_idx_ranges)
+            })
+
+            index = Index(dsk, name, meta, divisions, partition_sizes)
+            if isinstance(result, DataFrame):
+                result = result.set_index(index, drop=True, sorted=True, divisions=divisions)
+            else:
+                assert isinstance(result, Series)
+                result = result.to_frame().set_index(index, drop=True, sorted=True, divisions=divisions)[result.name]
         else:
             result = result.clear_divisions()
         return result
@@ -1802,6 +1822,7 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (min(self.columns), max(self.columns))
                 result.partition_sizes = (len(self.columns),)
+                result._len = sum(result.partition_sizes)
             return result
 
     @derived_from(pd.DataFrame)
@@ -1837,6 +1858,7 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (min(self.columns), max(self.columns))
                 result.partition_sizes = (len(self.columns),)
+                result._len = sum(result.partition_sizes)
             return result
 
     @derived_from(pd.DataFrame)
@@ -1862,6 +1884,7 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
+                result._len = sum(result.partition_sizes)
             return result
 
     @derived_from(pd.DataFrame)
@@ -1909,6 +1932,7 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
+                result._len = sum(result.partition_sizes)
             return handle_out(out, result)
 
     @derived_from(pd.DataFrame)
@@ -1952,6 +1976,7 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
+                result._len = sum(result.partition_sizes)
             return handle_out(out, result)
 
     def _var_numeric(self, skipna=True, ddof=1, split_every=False):
@@ -2118,6 +2143,7 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
+                result._len = sum(result.partition_sizes)
             return result
 
     def quantile(self, q=0.5, axis=0, method="default"):
@@ -2528,13 +2554,9 @@ Dask Name: {name}, {task} tasks"""
             enforce_metadata=False,
         )
 
-        if axis == 1:
-            partition_sizes1 = self.partition_sizes
-            partition_sizes2 = other.partition_sizes
-        else:
-            from .multi import maybe_infer_partition_sizes
-            partition_sizes1 = maybe_infer_partition_sizes(aligned.divisions, self)
-            partition_sizes2 = maybe_infer_partition_sizes(aligned.divisions, other)
+        from .multi import maybe_infer_partition_sizes
+        partition_sizes1 = maybe_infer_partition_sizes(aligned.divisions, self)
+        partition_sizes2 = maybe_infer_partition_sizes(aligned.divisions, other)
 
         token = tokenize(self, other, join, axis, fill_value)
 
@@ -2687,7 +2709,7 @@ Dask Name: {name}, {task} tasks"""
         Operations that depend on shape information, like slicing or reshaping,
         will not work.
         """
-        return self.map_partitions(methods.values)
+        return self.map_partitions(methods.values, preserve_partitions=True)
 
     def _validate_chunks(self, arr, lengths):
         from dask.array.core import normalize_chunks
@@ -5247,7 +5269,7 @@ def apply_concat_apply(
 
     divisions = [None] * (split_out + 1)
 
-    return new_dd_object(graph, b, meta, divisions)
+    return new_dd_object(graph, b, meta, divisions)  # TODO: partition_sizes
 
 
 aca = apply_concat_apply
@@ -5399,7 +5421,7 @@ def map_partitions(
             divisions = func(
                 *[pd.Index(a.divisions) if a is dfs[0] else a for a in args], **kwargs
             )
-            if isinstance(divisions, pd.Index):
+            if isinstance(divisions, (pd.Index, np.ndarray)):
                 divisions = divisions.tolist()
         except Exception:
             pass
@@ -5411,12 +5433,19 @@ def map_partitions(
     if preserve_partitions:
         from .multi import maybe_infer_partition_sizes
         partition_sizes = maybe_infer_partition_sizes(divisions, dfs[0])
-        if partition_sizes is None and divisions == dfs[0].divisions:
-            # If caller indicated partitions would be preserved, and divisions are not known (e.g.
-            # if the Frame is empty, and hence has divisions [None,None], but may have valid
-            # partition_sizes set), keep the original partition_sizes
-            partition_sizes = dfs[0].partition_sizes
-        elif partition_sizes != dfs[0].partition_sizes:
+
+        # Want to check whether divisions are unchanged below, ignoring changes betwwn null variants (e.g. None -> NaT)
+        from pandas import isnull
+        def normalize(divs):
+            return [ None if isnull(d) else d for d in divs ]
+
+        if normalize(divisions) == normalize(dfs[0].divisions):
+            if partition_sizes is None:
+                # If caller indicated partitions would be preserved, and divisions are not known (e.g.
+                # if the Frame is empty, and hence has divisions [None,None], but may have valid
+                # partition_sizes set), keep the original partition_sizes
+                partition_sizes = dfs[0].partition_sizes
+        else:
             warnings.warn(
                 "Expected partitions to be preserved, but partition-realignment detected:\ndivisions: %s\n\tBefore: \n\t\t%s\n\tAfter:\n\t\t%s\npartition_sizes: %s\n\tBefore:\n\t\t%s\n\tAfter:\n\t\t%s" % (
                     str(divisions),
@@ -6211,7 +6240,7 @@ def _repartition_from_boundaries(df, new_partitions_boundaries, new_name):
 
     partition_idx_starts = df.partition_idx_starts
     if partition_idx_starts:
-        partition_idx_bounds = df.partition_idx_starts + [df._len]
+        partition_idx_bounds = df.partition_idx_starts + (df._len,)
         new_partition_idx_bounds = [ partition_idx_bounds[i] for i in new_partitions_boundaries ]
         partition_sizes = [
             end - start
