@@ -5,7 +5,8 @@ import bisect
 import numpy as np
 import pandas as pd
 
-from .core import new_dd_object, Series
+import dask.dataframe as dd
+from .core import new_dd_object, Series, partitionwise_graph, Index
 from ..array.core import Array
 from .utils import is_index_like, meta_nonempty
 from . import methods
@@ -44,11 +45,11 @@ class _iLocIndexer(_IndexerBase):
         if isinstance(key, int):
             key = slice(key, key+1)
 
-        if isinstance(key, (slice, list)):
+        if isinstance(key, (slice, list, np.ndarray, Index, Series)):
             key = tuple([key])
 
         if not isinstance(key, tuple):
-            raise ValueError("Expected slice or tuple, got %s" % str(key))
+            raise ValueError("Expected slice or tuple or Dask Index, got %s" % str(key))
 
         obj = self.obj
 
@@ -65,7 +66,21 @@ class _iLocIndexer(_IndexerBase):
             raise pd.core.indexing.IndexingError("Expected tuple of length ≤2: %s" % str(key))
 
         partition_sizes = obj.partition_sizes
-        if iindexer != slice(None):
+        if isinstance(iindexer, Series): # and self.divisions == key.divisions:  # and self.known_divisions:
+            if iindexer.dtype == np.dtype(int):
+                raise Exception("not implemented")
+                """
+                name = "index-%s" % tokenize(self.obj, iindexer)
+                import operator
+                dsk = partitionwise_graph(operator.getitem, name, self.obj, iindexer)
+                graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self.obj, iindexer])
+                return dd.DataFrame(graph, name, self.obj._meta, self.obj.divisions, partition_sizes=self.obj.partition_sizes)
+                """
+            elif iindexer.dtype == np.dtype(bool):
+                return obj.loc[iindexer, cindexer]
+            else:
+                raise Exception(f"Expected a series to be of int or bool, not {iindexer.dtype}!")
+        elif not (isinstance(iindexer, slice) and iindexer == slice(None)):
             if not partition_sizes:
                 raise NotImplementedError("%s.iloc only supported for %s with known partition_sizes" % obj.__class__.__name__)
 
@@ -194,7 +209,12 @@ class _iLocIndexer(_IndexerBase):
                     return row_sliced
                 else:
                     return row_sliced.iloc[:, cindexer]
-            elif isinstance(iindexer, (list, tuple)):
+            elif isinstance(iindexer, (list, pd.Series, np.ndarray)):
+                if isinstance(iindexer, (pd.Series, np.ndarray)):
+                    assert(iindexer.dtype == np.dtype(int))
+                    if isinstance(iindexer, pd.Series):
+                        iindexer = iindexer.values
+                    iindexer = iindexer.tolist()
                 iindexer = sorted([ idx + _len if idx < 0 else idx for idx in iindexer ])
                 all_partition_idxs = {}
                 cur_partition_idxs = []
