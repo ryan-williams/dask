@@ -1517,15 +1517,18 @@ class Array(DaskMethodsMixin):
             index_type = '%s.%s' % (index.__class__.__module__, index.__class__.__name__)
             if index_type != 'dask.dataframe.core.Series':
                 raise ValueError("Can only slice a %s by a dask.dataframe.core.Series, not %s" % (self_type, index_type))
-            if not index.partition_sizes:
-                raise ValueError("Can't slice a %s with a %s that doesn't know its partition_sizes" % (self_type, index_type))
             from numpy import dtype
             if not index.dtype == dtype(bool):
                 raise ValueError("Slicing by %s series not supported, only bools" % index.dtype)
-
-            partition_sizes = self.chunks[0]
-            series = index.repartition(partition_sizes=partition_sizes)
-            return self[series.to_dask_array(lengths=True)]
+            if index.partition_sizes:
+                partition_sizes = self.chunks[0]
+                series = index.repartition(partition_sizes=partition_sizes)
+                return self[series.to_dask_array(lengths=True)]
+            else:
+                # Disabled this check because it works to leave it out, but is it correct? -ss
+                #raise ValueError(
+                #    "Can't slice a %s with a %s that doesn't know its partition_sizes" % (self_type, index_type))
+                return self[index.to_dask_array(lengths=True)]
 
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (

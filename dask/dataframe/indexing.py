@@ -82,7 +82,8 @@ class _iLocIndexer(_IndexerBase):
                 raise Exception(f"Expected a series to be of int or bool, not {iindexer.dtype}!")
         elif not (isinstance(iindexer, slice) and iindexer == slice(None)):
             if not partition_sizes:
-                raise NotImplementedError("%s.iloc only supported for %s with known partition_sizes" % obj.__class__.__name__)
+                print("")
+                #raise NotImplementedError("%s.iloc only supported for %s with known partition_sizes" % obj.__class__.__name__)
 
             _len = obj._len
 
