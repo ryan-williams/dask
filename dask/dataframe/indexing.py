@@ -133,8 +133,8 @@ class _iLocIndexer(_IndexerBase):
 
                 partial_prefix = None
                 partial_suffix = None
-                partition_sizes_prefix = []
-                partition_sizes_suffix = []
+                partition_sizes_prefix = ()
+                partition_sizes_suffix = ()
 
                 assert first_partition['start'] <= first_partition['m']
                 has_partial_prefix = first_partition['start'] < first_partition['m']
@@ -150,9 +150,7 @@ class _iLocIndexer(_IndexerBase):
                     start = first_partition['m'] - first_partition['start']
                     end = min(first_partition['end'], first_partition['M'])
                     drop_right = first_partition['end'] - end
-                    partition_sizes_prefix = [
-                        partition_sizes[first_partition_idx] - start - drop_right
-                    ]
+                    partition_sizes_prefix = (partition_sizes[first_partition_idx] - start - drop_right,)
                     partial_prefix = \
                         obj \
                             .partitions[first_partition_idx] \
@@ -172,7 +170,7 @@ class _iLocIndexer(_IndexerBase):
                         # Only compute+set a "suffix" if the partial final partition is not the same
                         # as a partial initial partition (handled above)
                         end = last_partition['end'] - last_partition['M']
-                        partition_sizes_suffix = [ partition_sizes[last_partition_idx] - end ]
+                        partition_sizes_suffix = (partition_sizes[last_partition_idx] - end,)
                         partial_suffix = \
                             obj \
                                 .partitions[last_partition_idx] \
@@ -211,7 +209,8 @@ class _iLocIndexer(_IndexerBase):
                     return row_sliced.iloc[:, cindexer]
             elif isinstance(iindexer, (list, pd.Series, np.ndarray)):
                 if isinstance(iindexer, (pd.Series, np.ndarray)):
-                    assert(iindexer.dtype == np.dtype(int))
+                    if iindexer.dtype != np.dtype(int):
+                        raise ValueError('%s dtype must be int, got %s: %s' % (type(iindexer).__name__, iindexer.dtype, iindexer))
                     if isinstance(iindexer, pd.Series):
                         iindexer = iindexer.values
                     iindexer = iindexer.tolist()

@@ -299,12 +299,14 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         self.divisions = tuple(divisions)
         self._len = None  # TODO: this should probably be a @property (derived from partition_sizes, not pickled / included in *args, etc.)
 
-        if partition_sizes is not None:
+        if partition_sizes is None:
+            self.partition_sizes = None
+        else:
             if divisions:
                 if len(partition_sizes) + 1 != len(divisions):
                     raise AssertionError("partition_sizes len %d doesn't correspond to divisions len %d" % (len(partition_sizes), len(divisions)))
             self._len = sum(partition_sizes)
-        self.partition_sizes = partition_sizes
+            self.partition_sizes = tuple(partition_sizes)
 
     def __dask_graph__(self):
         return self.dask
