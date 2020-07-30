@@ -6125,10 +6125,11 @@ def repartition_sizes(df, sizes):
     if partition_sizes == sizes:
         return df
 
-    cur_len = sum(partition_sizes)
     nxt_len = sum(sizes)
-    if cur_len != nxt_len:
-        raise ValueError("Current len %d != new len %d" % (cur_len, nxt_len))
+    if partition_sizes is not None:
+        cur_len = sum(partition_sizes)
+        if cur_len != nxt_len:
+            raise ValueError("Current len %d != new len %d" % (cur_len, nxt_len))
 
     new_idxs = [0] + np.cumsum(sizes).tolist()
 
