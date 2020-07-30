@@ -1133,6 +1133,7 @@ class _GroupBy(object):
             columns=columns,
             token=name_part,
             meta=meta,
+            # TODO: partition_sizes
             **self.dropna
         )
 
@@ -1162,6 +1163,7 @@ class _GroupBy(object):
             chunk=M.last,
             meta=meta,
             token=name_last,
+            # TODO: partition_sizes
             **self.dropna
         )
 

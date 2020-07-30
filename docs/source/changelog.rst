@@ -1,6 +1,68 @@
 Changelog
 =========
 
+2.21.0 / 2020-07-17
+-------------------
+
+Array
++++++
+
+- Correct error message in ``array.routines.gradient()`` (:pr:`6417`) `johnomotani`_
+- Fix blockwise concatenate for array with some ``dimension=1`` (:pr:`6342`) `Matthias Bussonnier`_
+
+Bag
++++
+
+- Fix ``bag.take`` example (:pr:`6418`) `Roberto Panai`_
+
+Core
+++++
+
+- Groups values in optimization pass should only be graph and keys -- not an optimization + keys (:pr:`6409`) `Ben Zaitlen`_
+- Call custom optimizations once, with ``kwargs`` provided (:pr:`6382`) `Clark Zinzow`_
+- Include ``pickle5`` for testing on Python 3.7 (:pr:`6379`) `John A Kirkham`_
+
+DataFrame
++++++++++
+
+- Correct typo in error message (:pr:`6422`) `Tom McTiernan`_
+- Use ``pytest.warns`` to check for ``UserWarning`` (:pr:`6378`) `Richard (Rick) Zamora`_
+- Parse ``bytes_per_chunk keyword`` from string (:pr:`6370`) `Matthew Rocklin`_
+
+Documentation
++++++++++++++
+
+- Numpydoc formatting (:pr:`6421`) `Matthias Bussonnier`_
+- Unpin ``numpydoc`` following 1.1 release (:pr:`6407`) `Gil Forsyth`_
+- Numpydoc formatting (:pr:`6402`) `Matthias Bussonnier`_
+- Add instructions for using conda when installing code for development (:pr:`6399`) `Ray Bell`_
+- Update ``visualize`` docstrings (:pr:`6383`) `Zhengnan`_
+
+
+2.20.0 / 2020-07-02
+-------------------
+
+Array
++++++
+
+- Register ``sizeof`` for numpy zero-strided arrays (:pr:`6343`) `Matthias Bussonnier`_
+- Use ``concatenate_lookup`` in ``concatenate`` (:pr:`6339`) `John A Kirkham`_
+- Fix rechunking of arrays with some zero-length dimensions (:pr:`6335`) `Matthias Bussonnier`_
+
+DataFrame
++++++++++
+
+- Dispatch ``iloc``` calls to ``getitem`` (:pr:`6355`) `Gil Forsyth`_
+- Handle unnamed pandas ``RangeIndex`` in fastparquet engine (:pr:`6350`) `Richard (Rick) Zamora`_
+- Preserve index when writing partitioned parquet datasets with pyarrow (:pr:`6282`) `Richard (Rick) Zamora`_
+- Use ``ignore_index`` for pandas' ``group_split_dispatch`` (:pr:`6251`) `Richard (Rick) Zamora`_
+
+Documentation
++++++++++++++
+
+- Add doc describing argument (:pr:`6318`) `asmith26`_
+
+
 2.19.0 / 2020-06-19
 -------------------
 
@@ -3351,3 +3413,9 @@ Other
 .. _`Eric Czech`: https://github.com/eric-czech
 .. _`Abdulelah Bin Mahfoodh`: https://github.com/abduhbm
 .. _`Ben Shaver`: https://github.com/bpshaver
+.. _`Matthias Bussonnier`: https://github.com/Carreau
+.. _`johnomotani`: https://github.com/johnomotani
+.. _`Roberto Panai`: https://github.com/rpanai
+.. _`Clark Zinzow`: https://github.com/clarkzinzow
+.. _`Tom McTiernan`: https://github.com/tmct
+.. _`Zhengnan`: https://github.com/ZhengnanZhao
