@@ -221,7 +221,7 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
         divisions = [None] * len(locations)
 
     partition_bounds = list(zip(locations[:-1], locations[1:]))
-    partition_sizes = [ stop-start for start, stop in partition_bounds ]
+    partition_sizes = tuple( stop-start for start, stop in partition_bounds )
     dsk = {
         (name, i): data.iloc[start:stop]
         for i, (start, stop) in enumerate(partition_bounds)

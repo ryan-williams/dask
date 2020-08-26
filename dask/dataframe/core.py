@@ -1500,13 +1500,13 @@ Dask Name: {name}, {task} tasks"""
         Returns
         -------
         """
-        if self.partition_sizes:
-            if isinstance(lengths, bool):
+        if lengths is True:
+            if self.partition_sizes:
                 lengths = self.partition_sizes
             else:
-                return self.repartition(partition_sizes=lengths).to_dask_array(lengths=True)
-        elif lengths is True:
-            lengths = tuple(self.map_partitions(len, enforce_metadata=False).compute())
+                lengths = tuple(self.map_partitions(len, enforce_metadata=False).compute())
+        elif isinstance(lengths, Sequence):
+            return self.repartition(partition_sizes=lengths).to_dask_array(lengths=True)
 
         arr = self.values
 
@@ -2738,6 +2738,12 @@ Dask Name: {name}, {task} tasks"""
                     "The number of items in 'lengths' does not match "
                     "the number of partitions. "
                     "{} != {}".format(len(lengths), self.npartitions)
+                )
+            if self.partition_sizes and self.partition_sizes != lengths:
+                raise ValueError(
+                    "The provided 'lengths' do not match "
+                    "the existing partition sizes. "
+                    "{} != {}".format(len(lengths), self.partition_sizes)
                 )
 
             if self.ndim == 1:
@@ -6148,7 +6154,7 @@ def repartition_sizes(df, sizes):
     if partition_sizes is not None:
         cur_len = sum(partition_sizes)
         if cur_len != nxt_len:
-            raise ValueError("Current len %d != new len %d" % (cur_len, nxt_len))
+            raise ValueError("Current len doesn't match new len: %d != %d" % (cur_len, nxt_len))
 
     new_idxs = [0] + np.cumsum(sizes).tolist()
 
@@ -6160,7 +6166,7 @@ def repartition_sizes(df, sizes):
     ]
     from dask.dataframe import concat
     result = concat(slices)
-    result.partition_sizes = sizes  # TODO: push this into the concat machinery
+    result.partition_sizes = tuple(sizes)  # TODO: push this into the concat machinery
     result._len = sum(sizes)
     return result
 

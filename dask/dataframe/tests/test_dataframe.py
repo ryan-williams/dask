@@ -209,13 +209,13 @@ def test_attributes():
 
 def test_partition_sizes():
     df = dd.from_pandas(pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ]), npartitions=3)
-    assert df.partition_sizes == [34,34,32]
+    assert df.partition_sizes == (34,34,32)
     df["len"] = df.i.map(len)
-    assert df.partition_sizes == [34,34,32]
-    assert df['len'].partition_sizes == [34,34,32]
-    assert df['i'].partition_sizes == [34,34,32]
+    assert df.partition_sizes == (34,34,32)
+    assert df['len'].partition_sizes == (34,34,32)
+    assert df['i'].partition_sizes == (34,34,32)
     assert len(df.compute()) == 100
-    assert [ len(partition.compute(scheduler='single-threaded')) for partition in df.partitions ] == [34,34,32]
+    assert tuple( len(partition.compute(scheduler='single-threaded')) for partition in df.partitions ) == (34,34,32)
 
     for series in [
         df.len + 2,
@@ -225,11 +225,11 @@ def test_partition_sizes():
         df.len % 2,
         df.len % 2 == 0,
     ]:
-        assert series.partition_sizes == [34,34,32]
+        assert series.partition_sizes == (34,34,32)
 
     evens = df.len % 2 == 0
-    assert df[evens].partition_sizes == [34,34,32]
-    assert evens[evens].partition_sizes == [34,34,32]
+    assert df[evens].partition_sizes == (34,34,32)
+    assert evens[evens].partition_sizes == (34,34,32)
 
     # def test_array_series_slice():
     from dask.array import from_array
@@ -256,44 +256,43 @@ def check_partition_sizes(df, *args, **kwargs):
             assert not kwargs
         assert df.partition_sizes == partition_sizes
         if partition_sizes is not None:
-            #df.map_partitions(len)
             computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
-            actual_sizes = [ len(partition) for partition in computed ]
+            actual_sizes = tuple( len(partition) for partition in computed )
             assert actual_sizes == partition_sizes
     else:
         computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
-        partition_sizes = [ len(partition) for partition in computed ]
+        partition_sizes = tuple( len(partition) for partition in computed )
         assert partition_sizes == df.partition_sizes
 
 
 def test_repartition_sizes():
     df = dd.from_pandas(pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ]), npartitions=3)
-    check_partition_sizes(df, [34,34,32])
+    check_partition_sizes(df, (34,34,32))
     df["len"] = df.i.map(len)
-    assert df.partition_sizes == [34,34,32]
-    assert df['len'].partition_sizes == [34,34,32]
-    assert df['i'].partition_sizes == [34,34,32]
+    assert df.partition_sizes == (34,34,32)
+    assert df['len'].partition_sizes == (34,34,32)
+    assert df['i'].partition_sizes == (34,34,32)
     assert len(df.compute()) == 100
 
     evens = df.len % 2 == 0
-    assert df[evens].partition_sizes == [34,34,32]
-    assert evens[evens].partition_sizes == [34,34,32]
+    assert df[evens].partition_sizes == (34,34,32)
+    assert evens[evens].partition_sizes == (34,34,32)
 
-    df2 = df.repartition(partition_sizes=[40,40,20])
+    df2 = df.repartition(partition_sizes=(40,40,20))
     from pandas.testing import assert_frame_equal
     assert_frame_equal(df.compute(), df2.compute())
-    check_partition_sizes(df2, [40,40,20])
+    check_partition_sizes(df2, (40,40,20))
 
     df3 = df.repartition(partition_sizes=[10]*10)
     from pandas.testing import assert_frame_equal
     assert_frame_equal(df.compute(), df3.compute())
-    check_partition_sizes(df3, [10]*10)
+    check_partition_sizes(df3, (10,)*10)
 
 
 def test_iloc():
     df = pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ])
     ddf = dd.from_pandas(df, npartitions=3)
-    assert ddf.partition_sizes == [34,34,32]
+    assert ddf.partition_sizes == (34,34,32)
     from pandas.testing import assert_frame_equal, assert_series_equal
 
     def checks(dask, pandas, cmp):
@@ -2785,7 +2784,7 @@ def test_to_dask_array_raises(as_frame):
     if as_frame:
         a = a.to_frame()
 
-    with pytest.raises(ValueError, match="4 != 2"):
+    with pytest.raises(ValueError, match="6 != 10"):
         a.to_dask_array((1, 2, 3, 4))
 
     with pytest.raises(ValueError, match="Unexpected value"):
