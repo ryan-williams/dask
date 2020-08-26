@@ -21,7 +21,7 @@ import dask.array as da
 import dask.dataframe
 from dask.base import tokenize, compute_as_if_collection
 from dask.delayed import Delayed, delayed
-from dask.utils import ignoring, tmpfile, tmpdir, key_split
+from dask.utils import ignoring, tmpfile, tmpdir, key_split, apply
 from dask.utils_test import inc, dec
 
 from dask.array.core import (
@@ -51,6 +51,7 @@ from dask.blockwise import (
     optimize_blockwise,
 )
 from dask.array.utils import assert_eq, same_keys
+from dask.array.numpy_compat import _numpy_120
 
 from numpy import nancumsum, nancumprod
 
@@ -93,6 +94,13 @@ def test_top():
 
     assert top(identity, "z", "", "x", "ij", numblocks={"x": (2, 2)}) == {
         ("z",): (identity, [[("x", 0, 0), ("x", 0, 1)], [("x", 1, 0), ("x", 1, 1)]])
+    }
+
+
+def test_top_with_kwargs():
+    assert top(add, "z", "i", "x", "i", numblocks={"x": (2, 0)}, b=100) == {
+        ("z", 0): (apply, add, [("x", 0)], {"b": 100}),
+        ("z", 1): (apply, add, [("x", 1)], {"b": 100}),
     }
 
 
@@ -1466,7 +1474,7 @@ def test_map_blocks_infer_chunks_broadcast():
     dx = da.from_array([[1, 2, 3, 4]], chunks=((1,), (2, 2)))
     dy = da.from_array([[10, 20], [30, 40]], chunks=((1, 1), (2,)))
     result = da.map_blocks(lambda x, y: x + y, dx, dy)
-    assert result.chunks == ((1, 1), (2, 2),)
+    assert result.chunks == ((1, 1), (2, 2))
     assert_eq(result, np.array([[11, 22, 13, 24], [31, 42, 33, 44]]))
 
 
@@ -4379,6 +4387,7 @@ def test_no_warnings_from_blockwise():
     assert not record
 
 
+@pytest.mark.xfail(_numpy_120, reason="https://github.com/pydata/sparse/issues/383")
 def test_from_array_meta():
     sparse = pytest.importorskip("sparse")
     x = np.ones(10)
