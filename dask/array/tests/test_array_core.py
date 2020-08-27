@@ -4276,7 +4276,8 @@ def test_scipy_sparse_concatenate(axis, stack, spmatrix):
 
 @pytest.mark.parametrize("axis", [0, 1, None, (0,1), np._NoValue])
 @pytest.mark.parametrize("format", ['coo','csr','csc'])
-def test_scipy_sparse_sum(axis, format):
+@pytest.mark.parametrize("keepdims", [False, True, np._NoValue])
+def test_scipy_sparse_sum(axis, format, keepdims):
     pytest.importorskip("scipy.sparse")
     from scipy.sparse import coo_matrix, csc_matrix, csr_matrix, random
 
@@ -4326,6 +4327,8 @@ def test_scipy_sparse_sum(axis, format):
     kwargs = {}
     if axis is not np._NoValue:
         kwargs['axis'] = axis
+    if keepdims is not np._NoValue:
+        kwargs['keepdims'] = keepdims
 
     # One of the parameterized cases (axis=1) exhibits non-zero but negligible
     # floating-point error, so we use assert_almost_equal here
