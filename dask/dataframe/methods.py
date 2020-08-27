@@ -78,10 +78,8 @@ def boundary_slice(
     Columns: []
     Index: []
     """
-    if isinstance(df, pd.Index):
-        index = df
-    else:
-        index = df.index
+    # Mind the case where `df` is a `pd.Index`
+    index = df if isinstance(df, pd.Index) else df.index
     if len(index) == 0:
         return df
 
@@ -95,11 +93,13 @@ def boundary_slice(
                 df = df[index >= start]
             else:
                 df = df[index > start]
+            index = df if isinstance(df, pd.Index) else df.index
         if stop is not None:
             if right_boundary:
                 df = df[index <= stop]
             else:
                 df = df[index < stop]
+            # not necessary to update `index` here since we are just returning
         return df
     else:
         if isinstance(df, pd.Index):

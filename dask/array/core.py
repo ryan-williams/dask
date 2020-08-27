@@ -20,7 +20,7 @@ from tlz.curried import pluck
 import numpy as np
 
 from . import chunk
-from .. import config, compute
+from .. import config, compute, dataframe
 from ..base import (
     DaskMethodsMixin,
     tokenize,
@@ -3888,11 +3888,9 @@ def is_scalar_for_elemwise(arg):
     >>> is_scalar_for_elemwise(np.dtype('i4'))
     True
     """
-    # the second half of shape_condition is essentially just to ensure that
-    # dask series / frame are treated as scalars in elemwise.
     maybe_shape = getattr(arg, "shape", None)
     shape_condition = not isinstance(maybe_shape, Iterable) or any(
-        is_dask_collection(x) for x in maybe_shape
+        is_dask_collection(x) for x in maybe_shape  # TODO: this excluding of dd._Frames should happen at callsites
     )
 
     return (
@@ -3964,7 +3962,7 @@ def elemwise(op, *args, **kwargs):
     shapes = []
     for arg in args:
         shape = getattr(arg, "shape", ())
-        if any(is_dask_collection(x) for x in shape):
+        if any(is_dask_collection(x) for x in shape) or isinstance(arg, dataframe._Frame):
             # Want to excluded Delayed shapes and dd.Scalar
             shape = ()
         shapes.append(shape)
@@ -3988,9 +3986,11 @@ def elemwise(op, *args, **kwargs):
         # them just like other arrays, and if necessary cast the result of op
         # to match.
         vals = [
-            np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
-            if not is_scalar_for_elemwise(a)
-            else a
+            (
+                a
+                if is_scalar_for_elemwise(a) or isinstance(a, dataframe._Frame)
+                else np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
+            )
             for a in args
         ]
         try:
