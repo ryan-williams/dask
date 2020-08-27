@@ -256,11 +256,11 @@ def check_partition_sizes(df, *args, **kwargs):
             assert not kwargs
         assert df.partition_sizes == partition_sizes
         if partition_sizes is not None:
-            computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
+            computed = compute(*[ partition for partition in df.partitions ])
             actual_sizes = tuple( len(partition) for partition in computed )
             assert actual_sizes == partition_sizes
     else:
-        computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
+        computed = compute(*[ partition for partition in df.partitions ])
         partition_sizes = tuple( len(partition) for partition in computed )
         assert partition_sizes == df.partition_sizes
 
@@ -297,7 +297,7 @@ def test_iloc():
 
     def checks(dask, pandas, cmp):
         def check(fn):
-            cmp(fn(dask).compute(scheduler='sync'), fn(pandas))
+            cmp(fn(dask).compute(), fn(pandas))
 
         check(lambda df: df.iloc[    : 100])
         check(lambda df: df.iloc[    :    ])

@@ -4281,9 +4281,6 @@ def test_scipy_sparse_sum(axis, format, keepdims):
     pytest.importorskip("scipy.sparse")
     from scipy.sparse import coo_matrix, csc_matrix, csr_matrix, random
 
-    import dask
-    dask.config.set(scheduler='sync')
-
     fmt_classes = {
         'coo': coo_matrix,
         'csr': csr_matrix,
