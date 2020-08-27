@@ -283,6 +283,27 @@ def partial_reduce(
         tuple(1 for p in partition_all(split_every[i], c)) if i in split_every else c
         for (i, c) in enumerate(x.chunks)
     ]
+
+    # HACK: mimicking np.matrix and scipy.sparse.spmatrix's non-Dask behavior:
+    # they require that their instances be 2-D, and they try to return an
+    # instance of themselves from operations like `sum`, so they effectively
+    # have keepdims=True when axis=0 or axis=1 (they preserve an extra
+    # dimension so that the output can be an np.matrix or
+    # scipy.sparse.spmatrix)
+    try:
+        import numpy as np
+        if isinstance(reduced_meta, np.matrix) and len(split_every) == 1:
+            keepdims = True
+    except ImportError:
+        pass
+
+    try:
+        from scipy.sparse import spmatrix
+        if isinstance(reduced_meta, spmatrix) and len(split_every) == 1:
+            keepdims = True
+    except ImportError:
+        pass
+
     if not keepdims:
         out_axis = [i for i in range(x.ndim) if i not in split_every]
         getter = lambda k: get(out_axis, k)

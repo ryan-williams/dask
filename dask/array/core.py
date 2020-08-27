@@ -1715,7 +1715,11 @@ class Array(DaskMethodsMixin):
 
     @property
     def A(self):
-        return self
+        if type(self._meta) is np.ndarray:
+            return self
+        else:
+            # numpy.matrix, scipy.sparse.spmatrix, …
+            return self.map_blocks(lambda block: block.A, dtype=self.dtype)
 
     @property
     def T(self):
@@ -4421,7 +4425,11 @@ def concatenate3(arrays):
         if hasattr(arr, "ndim"):
             while arr.ndim < ndim:
                 arr = arr[None, ...]
-        result[idx] = arr
+
+        try:
+            result[idx] = arr
+        except ValueError as e:
+            raise ValueError(f'outer shape {shape}, idx {idx} ({type(idx)}), arr {arr} (type {type(arr)}, shape {arr.shape})')
 
     return result
 
