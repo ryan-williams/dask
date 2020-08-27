@@ -4274,32 +4274,63 @@ def test_scipy_sparse_concatenate(axis, stack, spmatrix):
     assert (zz != z_expected).nnz == 0
 
 
-#@pytest.mark.parametrize("axis", [0, 1, None])
-#def test_scipy_sparse_sum(axis):
-def test_scipy_sparse_sum():
+@pytest.mark.parametrize("axis", [0, 1, None, (0,1), np._NoValue])
+@pytest.mark.parametrize("format", ['coo','csr','csc'])
+def test_scipy_sparse_sum(axis, format):
     pytest.importorskip("scipy.sparse")
-    from scipy.sparse import coo_matrix, csr_matrix, random
+    from scipy.sparse import coo_matrix, csc_matrix, csr_matrix, random
 
-    spmat = random(100, 100, format='csr')
-    assert isinstance(spmat, csr_matrix)
+    import dask
+    dask.config.set(scheduler='sync')
 
-    x = da.from_array(spmat, chunks=(20,10), asarray=False)
+    fmt_classes = {
+        'coo': coo_matrix,
+        'csr': csr_matrix,
+        'csc': csc_matrix,
+    }
+    fmt_class = fmt_classes[format]
+
+    # Create a Dask Array `x` w/ blocks of the specified spmatrix type
+    if format == 'coo':
+        # COO can't be created directly (da.from_array slices each block's
+        # index-range, and COO doesn't support slicing), so it is obtained
+        # indirectly by creating an Array w/ CSR blocks, and then applying the
+        # coo_matrix constructor to each block with a `map_blocks` call.
+        spmat = random(100, 100, format='csr')
+        assert isinstance(spmat, csr_matrix)
+
+        # Build Dask Array with spmatrix blocks
+        x = da.from_array(spmat, chunks=(20,10), asarray=False)
+        x = x.map_blocks(coo_matrix, chunks=(20,10))
+    else:
+        spmat = random(100, 100, format=format)
+        assert isinstance(spmat, fmt_class)
+
+        # Build Dask Array with spmatrix blocks
+        x = da.from_array(spmat, chunks=(20,10), asarray=False)
+
+    # Apply a simple elemwise operation
+    x = x * 2
+    spmat = spmat * 2
 
     xx = x.compute()
+
+    # spmatrices currently always emerge from Dask in COO format; CSR and CSC
+    # can each only be efficiently concatenated on one axis or the other, and
+    # .compute() generally has to combine chunks along both axes
     assert isinstance(xx, coo_matrix)
+
+    # Verify the spmatrices are equal
     assert (spmat != xx).nnz == 0
 
-    assert x.sum().compute() == spmat.sum()
+    kwargs = {}
+    if axis is not np._NoValue:
+        kwargs['axis'] = axis
 
-    # rs = da.random.RandomState(RandomState=np.random.RandomState)
-    #
-    # xs = []
-    # ys = []
-    # for i in range(2):
-    #     x = rs.random((1000, 10), chunks=(100, 5))
-    #     x[x < 0.9] = 0
-    #     xs.append(x)
-    #     ys.append(x.map_blocks(scipy.sparse.csr_matrix))
+    # One of the parameterized cases (axis=1) exhibits non-zero but negligible
+    # floating-point error, so we use assert_almost_equal here
+    from numpy.testing import assert_almost_equal
+    assert_almost_equal(x.sum(**kwargs).compute(), spmat.sum(**kwargs))
 
 
 def test_3851():
