@@ -88,11 +88,11 @@ class _iLocIndexer(_IndexerBase):
             _len = obj._len
 
             if isinstance(iindexer, slice):
-                start, stop, step = (iindexer.start or 0), (iindexer.stop if iindexer.stop is not None else obj._len), (iindexer.step or 1)
+                start, stop, step = (iindexer.start or 0), (iindexer.stop if iindexer.stop is not None else _len), (iindexer.step or 1)
                 if start < 0:
-                    start += obj._len
+                    start += _len
                 if stop < 0:
-                    stop += obj._len
+                    stop += _len
                 m, M = min(start, stop), max(start, stop)
                 m = np.clip(m, 0, _len)
                 M = np.clip(M, 0, _len)

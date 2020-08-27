@@ -298,7 +298,6 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
             )
         self._meta = meta
         self.divisions = tuple(divisions)
-        self._len = None  # TODO: this should probably be a @property (derived from partition_sizes, not pickled / included in *args, etc.)
 
         if partition_sizes is None:
             self.partition_sizes = None
@@ -306,7 +305,6 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
             if divisions:
                 if len(partition_sizes) + 1 != len(divisions):
                     raise AssertionError("partition_sizes len %d doesn't correspond to divisions len %d" % (len(partition_sizes), len(divisions)))
-            self._len = sum(partition_sizes)
             self.partition_sizes = tuple(partition_sizes)
 
     def __dask_graph__(self):
@@ -355,6 +353,13 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         )
 
     @property
+    def _len(self):
+        if self.partition_sizes is None:
+            return None
+        else:
+            return sum(self.partition_sizes)
+
+    @property
     def partition_idx_starts(self):
         if self.partition_sizes:
             return tuple([0] + np.cumsum(self.partition_sizes)[:-1].tolist())
@@ -386,7 +391,6 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
 
     def __setstate__(self, state):
         self.dask, self._name, self._meta, self.divisions, self.partition_sizes = state
-        self._len = sum(self.partition_sizes) if self.partition_sizes is not None else None
 
     def copy(self):
         """ Make a copy of the dataframe
@@ -464,7 +468,7 @@ Dask Name: {name}, {task} tasks"""
     @property
     def index(self):
         """Return dask Index instance"""
-        index = self.map_partitions(
+        return self.map_partitions(
             getattr,
             "index",
             token=self._name + "-index",
@@ -472,9 +476,6 @@ Dask Name: {name}, {task} tasks"""
             enforce_metadata=False,
             preserve_partitions=True,
         )
-        if self._len:
-            index._len = self._len
-        return index
 
     @index.setter
     def index(self, value):
@@ -512,8 +513,8 @@ Dask Name: {name}, {task} tasks"""
         partition_sizes = result.partition_sizes
         if partition_sizes:
             name = 'default-index-%s' % tokenize(partition_sizes)
-            _len = result._len
             partition_idx_starts = result.partition_idx_starts
+            _len = result._len
             divisions = partition_idx_starts + (_len - 1,)
 
             from pandas import RangeIndex
@@ -541,7 +542,6 @@ Dask Name: {name}, {task} tasks"""
     @property
     def known_divisions(self):
         """Whether divisions are already known"""
-        #return len(self.divisions) > 0 and all(division is not None for division in self.divisions)
         return len(self.divisions) > 0 and self.divisions[0] is not None
 
     def clear_divisions(self):
@@ -594,7 +594,7 @@ Dask Name: {name}, {task} tasks"""
         )
 
     def __len__(self):
-        _len = getattr(self, "_len", None)  # TODO: this should be unnecessary; _len should always be set to None (when unknown)
+        _len = self._len
         if _len is not None:
             return _len
         return self.reduction(
@@ -1840,7 +1840,6 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (min(self.columns), max(self.columns))
                 result.partition_sizes = (len(self.columns),)
-                result._len = sum(result.partition_sizes)
             return result
 
     @derived_from(pd.DataFrame)
@@ -1876,7 +1875,6 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (min(self.columns), max(self.columns))
                 result.partition_sizes = (len(self.columns),)
-                result._len = sum(result.partition_sizes)
             return result
 
     @derived_from(pd.DataFrame)
@@ -1902,7 +1900,6 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
-                result._len = sum(result.partition_sizes)
             return result
 
     @derived_from(pd.DataFrame)
@@ -1950,7 +1947,6 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
-                result._len = sum(result.partition_sizes)
             return handle_out(out, result)
 
     @derived_from(pd.DataFrame)
@@ -1994,7 +1990,6 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
-                result._len = sum(result.partition_sizes)
             return handle_out(out, result)
 
     def _var_numeric(self, skipna=True, ddof=1, split_every=False):
@@ -2161,7 +2156,6 @@ Dask Name: {name}, {task} tasks"""
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
                 result.partition_sizes = (len(self.columns),)
-                result._len = sum(result.partition_sizes)
             return result
 
     def quantile(self, q=0.5, axis=0, method="default"):
@@ -2861,9 +2855,10 @@ class Series(_Frame):
         >>> series.shape  # doctest: +SKIP
         # (dd.Scalar<size-ag..., dtype=int64>,)
         """
+        _len = self._len
         return (
-            self._len
-            if self._len is not None
+            _len
+            if _len is not None
             else self.size,
         )
 
@@ -3778,8 +3773,6 @@ class DataFrame(_Frame):
     def __getattr__(self, key):
         if key in self.columns:
             return self[key]
-        elif key == '_len':
-            return super()._len
         else:
             raise AttributeError("'DataFrame' object has no attribute %r" % key)
 
@@ -3814,8 +3807,9 @@ class DataFrame(_Frame):
         (Delayed('int-07f06075-5ecc-4d77-817e-63c69a9188a8'), 2)
         """
         col_size = len(self.columns)
-        if self._len is not None:
-            row_size = self._len
+        _len = self._len
+        if _len is not None:
+            row_size = _len
         else:
             if col_size == 0:
                 return (self.index.shape[0], 0)
@@ -6169,7 +6163,6 @@ def repartition_sizes(df, sizes):
     from dask.dataframe import concat
     result = concat(slices)
     result.partition_sizes = tuple(sizes)  # TODO: push this into the concat machinery
-    result._len = sum(sizes)
     return result
 
 
