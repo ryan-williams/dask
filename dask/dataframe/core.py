@@ -527,6 +527,8 @@ Dask Name: {name}, {task} tasks"""
             })
 
             index = Index(dsk, name, meta, divisions, partition_sizes)
+            # Force divisions to conform to partition_sizes (and new index's divisions, so alignment works as expected)
+            result.divisions = index.divisions
             if isinstance(result, DataFrame):
                 result = result.set_index(index, drop=True, sorted=True, divisions=divisions)
             else:
@@ -545,7 +547,7 @@ Dask Name: {name}, {task} tasks"""
     def clear_divisions(self):
         """ Forget division information """
         divisions = (None,) * (self.npartitions + 1)
-        return type(self)(self.dask, self._name, self._meta, divisions)
+        return type(self)(self.dask, self._name, self._meta, divisions, partition_sizes=None)  # TODO: should partition_sizes be preserved here?
 
     def get_partition(self, n):
         """Get a dask DataFrame/Series representing the `nth` partition."""
