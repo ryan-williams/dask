@@ -3036,11 +3036,9 @@ Dask Name: {name}, {task} tasks""".format(
         return partition_quantiles(self, npartitions, upsample=upsample)
 
     def __getitem__(self, key):
-        if isinstance(key, Series) and self.divisions == key.divisions:
-            name = "index-%s" % tokenize(self, key)
-            dsk = partitionwise_graph(operator.getitem, name, self, key)
-            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
-            return Series(graph, name, self._meta, self.divisions)
+        if isinstance(key, Series):
+            return map_partitions(operator.getitem, self, key, meta=self._meta)
+
         raise NotImplementedError(
             "Series getitem in only supported for other series objects "
             "with matching partition structure"
