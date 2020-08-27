@@ -20,7 +20,7 @@ from tlz.curried import pluck
 import numpy as np
 
 from . import chunk
-from .. import config, compute, dataframe
+from .. import config, compute
 from ..base import (
     DaskMethodsMixin,
     tokenize,
@@ -3959,10 +3959,11 @@ def elemwise(op, *args, **kwargs):
 
     args = [np.asarray(a) if isinstance(a, (list, tuple)) else a for a in args]
 
+    from ..dataframe import _Frame
     shapes = []
     for arg in args:
         shape = getattr(arg, "shape", ())
-        if any(is_dask_collection(x) for x in shape) or isinstance(arg, dataframe._Frame):
+        if any(is_dask_collection(x) for x in shape) or isinstance(arg, _Frame):
             # Want to excluded Delayed shapes and dd.Scalar
             shape = ()
         shapes.append(shape)
@@ -3985,10 +3986,11 @@ def elemwise(op, *args, **kwargs):
         # hold potentially very expensive calculations. Instead, we treat
         # them just like other arrays, and if necessary cast the result of op
         # to match.
+        from ..dataframe import _Frame
         vals = [
             (
                 a
-                if is_scalar_for_elemwise(a) or isinstance(a, dataframe._Frame)
+                if is_scalar_for_elemwise(a) or isinstance(a, _Frame)
                 else np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
             )
             for a in args
