@@ -78,33 +78,44 @@ def boundary_slice(
     Columns: []
     Index: []
     """
-    if len(df.index) == 0:
+    # Mind the case where `df` is a `pd.Index`
+    index = df if isinstance(df, pd.Index) else df.index
+    if len(index) == 0:
         return df
 
-    if kind == "loc" and not df.index.is_monotonic:
+    if kind == "loc" and not index.is_monotonic:
         # Pandas treats missing keys differently for label-slicing
         # on monotonic vs. non-monotonic indexes
         # If the index is monotonic, `df.loc[start:stop]` is fine.
         # If it's not, `df.loc[start:stop]` raises when `start` is missing
         if start is not None:
             if left_boundary:
-                df = df[df.index >= start]
+                df = df[index >= start]
             else:
-                df = df[df.index > start]
+                df = df[index > start]
+            index = df if isinstance(df, pd.Index) else df.index
         if stop is not None:
             if right_boundary:
-                df = df[df.index <= stop]
+                df = df[index <= stop]
             else:
-                df = df[df.index < stop]
+                df = df[index < stop]
+            # not necessary to update `index` here since we are just returning
         return df
     else:
-        result = getattr(df, kind)[start:stop]
+        if isinstance(df, pd.Index):
+            result = getattr(df.to_frame(), kind)[start:stop].index
+            index = result
+            iloc = index
+        else:
+            result = getattr(df, kind)[start:stop]
+            index = result.index
+            iloc = result.iloc
     if not right_boundary and stop is not None:
-        right_index = result.index.get_slice_bound(stop, "left", kind)
-        result = result.iloc[:right_index]
+        right_index = index.get_slice_bound(stop, "left", kind)
+        result = iloc[:right_index]
     if not left_boundary and start is not None:
-        left_index = result.index.get_slice_bound(start, "right", kind)
-        result = result.iloc[left_index:]
+        left_index = index.get_slice_bound(start, "right", kind)
+        result = iloc[left_index:]
     return result
 
 

@@ -1551,6 +1551,18 @@ class Array(DaskMethodsMixin):
             )
 
     def __getitem__(self, index):
+        from dask.dataframe import Series
+        if isinstance(index, Series):
+            from numpy import dtype
+            if not index.dtype == dtype(bool):
+                raise ValueError("Slicing by %s series not supported, only bools" % index.dtype)
+            if index.partition_sizes is not None:
+                partition_sizes = self.chunks[0]
+                series = index.repartition(partition_sizes=partition_sizes)
+                return self[series.to_dask_array(lengths=True)]
+            else:
+                return self[index.to_dask_array(lengths=True)]
+
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (
             isinstance(index, list) and index and all(isinstance(i, str) for i in index)
@@ -1859,6 +1871,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __add__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.add, self, other)
 
     @check_if_handled_given_other
@@ -1867,6 +1882,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __and__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.and_, self, other)
 
     @check_if_handled_given_other
@@ -1875,6 +1893,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __div__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.div, self, other)
 
     @check_if_handled_given_other
@@ -1914,6 +1935,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __mod__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mod, self, other)
 
     @check_if_handled_given_other
@@ -1922,6 +1946,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __mul__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mul, self, other)
 
     @check_if_handled_given_other
@@ -1937,17 +1964,23 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __or__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.or_, self, other)
-
-    def __pos__(self):
-        return self
 
     @check_if_handled_given_other
     def __ror__(self, other):
         return elemwise(operator.or_, other, self)
 
+    def __pos__(self):
+        return self
+
     @check_if_handled_given_other
     def __pow__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.pow, self, other)
 
     @check_if_handled_given_other
@@ -1964,6 +1997,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __sub__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.sub, self, other)
 
     @check_if_handled_given_other
@@ -1972,6 +2008,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __truediv__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.truediv, self, other)
 
     @check_if_handled_given_other
@@ -1980,6 +2019,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __floordiv__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.floordiv, self, other)
 
     @check_if_handled_given_other
@@ -1988,6 +2030,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __xor__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.xor, self, other)
 
     @check_if_handled_given_other
@@ -1996,6 +2041,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __matmul__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .routines import matmul
 
         return matmul(self, other)
@@ -2008,6 +2056,9 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __divmod__(self, other):
+        from ..dataframe import DataFrame, Series
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .ufunc import divmod
 
         return divmod(self, other)
@@ -3916,18 +3967,15 @@ def is_scalar_for_elemwise(arg):
     >>> is_scalar_for_elemwise(np.dtype('i4'))
     True
     """
-    # the second half of shape_condition is essentially just to ensure that
-    # dask series / frame are treated as scalars in elemwise.
     maybe_shape = getattr(arg, "shape", None)
-    shape_condition = not isinstance(maybe_shape, Iterable) or any(
-        is_dask_collection(x) for x in maybe_shape
-    )
 
+    from ..dataframe import _Frame
     return (
         np.isscalar(arg)
-        or shape_condition
+        or not isinstance(maybe_shape, Iterable)
         or isinstance(arg, np.dtype)
         or (isinstance(arg, np.ndarray) and arg.ndim == 0)
+        or isinstance(arg, _Frame)
     )
 
 
@@ -3981,14 +4029,15 @@ def elemwise(op, *args, **kwargs):
     blockwise
     """
     out = kwargs.pop("out", None)
-    if not set(["name", "dtype"]).issuperset(kwargs):
+    if not {"name", "dtype"}.issuperset(kwargs):
         msg = "%s does not take the following keyword arguments %s"
         raise TypeError(
-            msg % (op.__name__, str(sorted(set(kwargs) - set(["name", "dtype"]))))
+            msg % (op.__name__, str(sorted(set(kwargs) - {"name", "dtype"})))
         )
 
     args = [np.asarray(a) if isinstance(a, (list, tuple)) else a for a in args]
 
+    from ..dataframe import _Frame
     shapes = []
     for arg in args:
         shape = getattr(arg, "shape", ())
@@ -4016,9 +4065,11 @@ def elemwise(op, *args, **kwargs):
         # them just like other arrays, and if necessary cast the result of op
         # to match.
         vals = [
-            np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
-            if not is_scalar_for_elemwise(a)
-            else a
+            (
+                a
+                if is_scalar_for_elemwise(a)
+                else np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
+            )
             for a in args
         ]
         try:

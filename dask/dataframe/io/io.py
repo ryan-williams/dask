@@ -208,7 +208,7 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
     name = name or ("from_pandas-" + tokenize(data, chunksize))
 
     if not nrows:
-        return new_dd_object({(name, 0): data}, name, data, [None, None])
+        return new_dd_object({(name, 0): data}, name, data, divisions=[None, None], partition_sizes=[0])
 
     if sort and not data.index.is_monotonic_increasing:
         data = data.sort_index(ascending=True)
@@ -220,11 +220,13 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
         locations = list(range(0, nrows, chunksize)) + [len(data)]
         divisions = [None] * len(locations)
 
+    partition_bounds = list(zip(locations[:-1], locations[1:]))
+    partition_sizes = tuple( stop-start for start, stop in partition_bounds )
     dsk = {
         (name, i): data.iloc[start:stop]
-        for i, (start, stop) in enumerate(zip(locations[:-1], locations[1:]))
+        for i, (start, stop) in enumerate(partition_bounds)
     }
-    return new_dd_object(dsk, name, data, divisions)
+    return new_dd_object(dsk, name, data, divisions, partition_sizes)
 
 
 def from_bcolz(x, chunksize=None, categorize=True, index=None, lock=lock, **kwargs):
@@ -543,7 +545,7 @@ def to_records(df):
     dask.dataframe._Frame.values
     dask.dataframe.from_dask_array
     """
-    return df.map_partitions(M.to_records)
+    return df.map_partitions(M.to_records)  # TODO: partition_sizes
 
 
 @insert_meta_param_description

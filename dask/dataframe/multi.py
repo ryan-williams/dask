@@ -149,6 +149,30 @@ def align_partitions(*dfs):
     return dfs2, tuple(divisions), result
 
 
+def maybe_infer_partition_sizes(divisions, prev):
+    if not prev.partition_sizes or not prev.known_divisions:
+        return None
+    partition_bounds = [0] + np.cumsum(prev.partition_sizes).tolist()[:-1]
+    _len = prev._len
+    division_idx_map = { division: idx for idx, division in zip(partition_bounds, prev.divisions[:-1]) }
+    m = min(prev.divisions)
+    M = max(prev.divisions)
+
+    idxs = []
+    for idx, division in enumerate(divisions[:-1]):
+        if division in division_idx_map:
+            idxs.append(division_idx_map[division])
+        elif division < m:
+            idxs.append(0)
+        elif division > M or division == M: #and idx + 1 == len(divisions):
+            idxs.append(_len)
+        else:
+            return None
+    idxs.append(_len)
+    sizes = [ end - start for start, end in zip(idxs[:-1], idxs[1:]) ]
+    return sizes
+
+
 def _maybe_align_partitions(args):
     """Align DataFrame blocks if divisions are different.
 
@@ -848,7 +872,7 @@ def merge_asof(
             if divs is not None:
                 result = result.set_index(ixcol, sorted=True, divisions=divs)
             else:
-                result = result.map_partitions(M.set_index, ixcol)
+                result = result.map_partitions(M.set_index, ixcol, preserve_partition_sizes=True)
             result = result.map_partitions(M.rename_axis, ixname)
 
     return result
@@ -906,7 +930,14 @@ def concat_indexed_dataframes(dfs, axis=0, join="outer", **kwargs):
     for df in dfs2:
         dsk.update(df.dask)
 
-    return new_dd_object(dsk, name, meta, divisions)
+    if \
+        len(set([ tuple(df.divisions) for df in dfs if df.divisions is not None ])) == 1 and \
+        len(set([ tuple(df.partition_sizes) for df in dfs if df.partition_sizes is not None ])) == 1:
+        partition_sizes = dfs[0].partition_sizes
+        assert dfs[0].divisions == dfs2[0].divisions
+    else:
+        partition_sizes = None
+    return new_dd_object(dsk, name, meta, divisions, partition_sizes=partition_sizes)
 
 
 def stack_partitions(dfs, divisions, join="outer", **kwargs):

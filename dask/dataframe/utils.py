@@ -642,7 +642,7 @@ def check_meta(x, meta, funcname=None, numeric_equal=True):
             "Index, got `%s`" % typename(type(meta))
         )
 
-    if type(x) != type(meta):
+    if not issubclass(type(x), type(meta)):
         errmsg = "Expected partition of type `%s` but got `%s`" % (
             typename(type(meta)),
             typename(type(x)),
