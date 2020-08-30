@@ -932,6 +932,7 @@ def check_index(ind, dimension):
     """
     # unknown dimension, assumed to be in bounds
     import pandas as pd
+
     if np.isnan(dimension):
         return
     elif isinstance(ind, (list, np.ndarray, pd.Series)):

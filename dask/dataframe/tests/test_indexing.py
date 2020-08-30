@@ -320,9 +320,9 @@ def test_series_getitem_slice():
     C = ddf.C
     assert_eq(ddf.A[C], df.A[df.C])
     # Slicing doesn't require equal divisions; alignment flow sorts it out
-    C2 = C.repartition(divisions=('a','e','i'))
+    C2 = C.repartition(divisions=("a", "e", "i"))
     assert_eq(ddf.A[C2], df.A[df.C])
-    C4 = C.repartition(divisions=('a','c','g','i'))
+    C4 = C.repartition(divisions=("a", "c", "g", "i"))
     assert_eq(ddf.A[C4], df.A[df.C])
 
 

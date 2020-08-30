@@ -304,7 +304,10 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         else:
             if divisions:
                 if len(partition_sizes) + 1 != len(divisions):
-                    raise AssertionError("partition_sizes len %d doesn't correspond to divisions len %d" % (len(partition_sizes), len(divisions)))
+                    raise AssertionError(
+                        "partition_sizes len %d doesn't correspond to divisions len %d"
+                        % (len(partition_sizes), len(divisions))
+                    )
             self.partition_sizes = tuple(partition_sizes)
 
     def __dask_graph__(self):
@@ -398,7 +401,9 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         This is strictly a shallow copy of the underlying computational graph.
         It does not affect the underlying data
         """
-        return new_dd_object(self.dask, self._name, self._meta, self.divisions, self.partition_sizes)
+        return new_dd_object(
+            self.dask, self._name, self._meta, self.divisions, self.partition_sizes
+        )
 
     def __array__(self, dtype=None, **kwargs):
         self._computed = self.compute()
@@ -481,7 +486,11 @@ Dask Name: {name}, {task} tasks"""
     def index(self, value):
         self.divisions = value.divisions
         result = map_partitions(
-            methods.assign_index, self, value, enforce_metadata=False, preserve_partition_sizes=True
+            methods.assign_index,
+            self,
+            value,
+            enforce_metadata=False,
+            preserve_partition_sizes=True,
         )
         self.dask = result.dask
         self._name = result._name
@@ -508,33 +517,43 @@ Dask Name: {name}, {task} tasks"""
             Do not try to insert index into dataframe columns.
         """
         result = self.map_partitions(
-            M.reset_index, drop=drop, enforce_metadata=False, preserve_partition_sizes=True,
+            M.reset_index,
+            drop=drop,
+            enforce_metadata=False,
+            preserve_partition_sizes=True,
         )
         partition_sizes = result.partition_sizes
         if partition_sizes:
-            name = 'default-index-%s' % tokenize(partition_sizes)
+            name = "default-index-%s" % tokenize(partition_sizes)
             partition_idx_starts = result.partition_idx_starts
             _len = result._len
             divisions = partition_idx_starts + (_len - 1,)
 
             from pandas import RangeIndex
+
             meta = RangeIndex(0, 0)
 
             partition_idx_ranges = result.partition_idx_ranges
-            dsk = HighLevelGraph.from_collections(name, {
-                (name, idx): RangeIndex(start, end)
-                for idx, (start, end)
-                in enumerate(partition_idx_ranges)
-            })
+            dsk = HighLevelGraph.from_collections(
+                name,
+                {
+                    (name, idx): RangeIndex(start, end)
+                    for idx, (start, end) in enumerate(partition_idx_ranges)
+                },
+            )
 
             index = Index(dsk, name, meta, divisions, partition_sizes)
             # Force divisions to conform to partition_sizes (and new index's divisions, so alignment works as expected)
             result.divisions = index.divisions
             if isinstance(result, DataFrame):
-                result = result.set_index(index, drop=True, sorted=True, divisions=divisions)
+                result = result.set_index(
+                    index, drop=True, sorted=True, divisions=divisions
+                )
             else:
                 assert isinstance(result, Series)
-                result = result.to_frame().set_index(index, drop=True, sorted=True, divisions=divisions)[result.name]
+                result = result.to_frame().set_index(
+                    index, drop=True, sorted=True, divisions=divisions
+                )[result.name]
         else:
             result = result.clear_divisions()
         return result
@@ -547,7 +566,9 @@ Dask Name: {name}, {task} tasks"""
     def clear_divisions(self):
         """ Forget division information """
         divisions = (None,) * (self.npartitions + 1)
-        return type(self)(self.dask, self._name, self._meta, divisions, partition_sizes=None)  # TODO: should partition_sizes be preserved here?
+        return type(self)(
+            self.dask, self._name, self._meta, divisions, partition_sizes=None
+        )  # TODO: should partition_sizes be preserved here?
 
     def get_partition(self, n):
         """Get a dask DataFrame/Series representing the `nth` partition."""
@@ -556,7 +577,13 @@ Dask Name: {name}, {task} tasks"""
             divisions = self.divisions[n : n + 2]
             layer = {(name, 0): (self._name, n)}
             graph = HighLevelGraph.from_collections(name, layer, dependencies=[self])
-            return new_dd_object(graph, name, self._meta, divisions, [self.partition_sizes[n]] if self.partition_sizes else None)
+            return new_dd_object(
+                graph,
+                name,
+                self._meta,
+                divisions,
+                [self.partition_sizes[n]] if self.partition_sizes else None,
+            )
         else:
             msg = "n must be 0 <= n < {0}".format(self.npartitions)
             raise ValueError(msg)
@@ -1112,7 +1139,11 @@ Dask Name: {name}, {task} tasks"""
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
         result = new_dd_object(
-            graph, name, self._meta, [self.divisions[0], self.divisions[npartitions]], partition_sizes
+            graph,
+            name,
+            self._meta,
+            [self.divisions[0], self.divisions[npartitions]],
+            partition_sizes,
         )
 
         if compute:
@@ -1134,7 +1165,9 @@ Dask Name: {name}, {task} tasks"""
             size = min(n, self.partition_sizes[-1])
             partition_sizes = [size]
 
-        result = new_dd_object(graph, name, self._meta, self.divisions[-2:], partition_sizes)
+        result = new_dd_object(
+            graph, name, self._meta, self.divisions[-2:], partition_sizes
+        )
 
         if compute:
             result = result.compute()
@@ -1185,7 +1218,9 @@ Dask Name: {name}, {task} tasks"""
         dsk = {(name, i): tuple(key) for i, key in enumerate(new_keys)}
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(graph, name, self._meta, divisions)  # TODO: partition_sizes
+        return new_dd_object(
+            graph, name, self._meta, divisions
+        )  # TODO: partition_sizes
 
     @property
     def partitions(self):
@@ -1407,7 +1442,9 @@ Dask Name: {name}, {task} tasks"""
                 for i in range(self.npartitions)
             }
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-            parts = new_dd_object(graph, name, meta, self.divisions, self.partition_sizes)
+            parts = new_dd_object(
+                graph, name, meta, self.divisions, self.partition_sizes
+            )
         else:
             parts = self
 
@@ -1470,7 +1507,9 @@ Dask Name: {name}, {task} tasks"""
         }
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(graph, name, self._meta, self.divisions)  # TODO: partition_sizes
+        return new_dd_object(
+            graph, name, self._meta, self.divisions
+        )  # TODO: partition_sizes
 
     @derived_from(pd.DataFrame)
     def replace(self, to_replace=None, value=None, regex=False):
@@ -1509,7 +1548,9 @@ Dask Name: {name}, {task} tasks"""
             if self.partition_sizes:
                 lengths = self.partition_sizes
             else:
-                lengths = tuple(self.map_partitions(len, enforce_metadata=False).compute())
+                lengths = tuple(
+                    self.map_partitions(len, enforce_metadata=False).compute()
+                )
         elif isinstance(lengths, Sequence):
             return self.repartition(partition_sizes=lengths).to_dask_array(lengths=True)
 
@@ -1898,7 +1939,12 @@ Dask Name: {name}, {task} tasks"""
         if axis == 1:
             meta = self._meta_nonempty.count(axis=axis)
             return self.map_partitions(
-                M.count, meta=meta, token=token, axis=axis, enforce_metadata=False, preserve_partition_sizes=True
+                M.count,
+                meta=meta,
+                token=token,
+                axis=axis,
+                enforce_metadata=False,
+                preserve_partition_sizes=True,
             )
         else:
             meta = self._meta_nonempty.count()
@@ -2220,13 +2266,17 @@ Dask Name: {name}, {task} tasks"""
                 )
                 divisions = (min(num.columns), max(num.columns))
                 partition_sizes = (len(self.columns),)
-                return Series(graph, keyname, meta, divisions, partition_sizes=partition_sizes)
+                return Series(
+                    graph, keyname, meta, divisions, partition_sizes=partition_sizes
+                )
             else:
                 layer = {(keyname, 0): (methods.concat, qnames, 1)}
                 graph = HighLevelGraph.from_collections(
                     keyname, layer, dependencies=quantiles
                 )
-                return DataFrame(graph, keyname, meta, quantiles[0].divisions)  # TODO: partition_sizes
+                return DataFrame(
+                    graph, keyname, meta, quantiles[0].divisions
+                )  # TODO: partition_sizes
 
     @derived_from(pd.DataFrame)
     def describe(
@@ -2390,7 +2440,9 @@ Dask Name: {name}, {task} tasks"""
 
         if axis == 1:
             name = "{0}{1}(axis=1)".format(self._token_prefix, op_name)
-            result = self.map_partitions(chunk, token=name, **chunk_kwargs, preserve_partition_sizes=True)
+            result = self.map_partitions(
+                chunk, token=name, **chunk_kwargs, preserve_partition_sizes=True
+            )
             return handle_out(out, result)
         else:
             # cumulate each partitions
@@ -2432,7 +2484,9 @@ Dask Name: {name}, {task} tasks"""
             graph = HighLevelGraph.from_collections(
                 name, layer, dependencies=[cumpart, cumlast]
             )
-            result = new_dd_object(graph, name, chunk(self._meta), self.divisions, self.partition_sizes)
+            result = new_dd_object(
+                graph, name, chunk(self._meta), self.divisions, self.partition_sizes
+            )
             return handle_out(out, result)
 
     @derived_from(pd.DataFrame)
@@ -2487,24 +2541,44 @@ Dask Name: {name}, {task} tasks"""
     def where(self, cond, other=np.nan):
         # cond and other may be dask instance,
         # passing map_partitions via keyword will not be aligned
-        return map_partitions(M.where, self, cond, other, enforce_metadata=False, preserve_partition_sizes=True)
+        return map_partitions(
+            M.where,
+            self,
+            cond,
+            other,
+            enforce_metadata=False,
+            preserve_partition_sizes=True,
+        )
 
     @derived_from(pd.DataFrame)
     def mask(self, cond, other=np.nan):
-        return map_partitions(M.mask, self, cond, other, enforce_metadata=False, preserve_partition_sizes=True)
+        return map_partitions(
+            M.mask,
+            self,
+            cond,
+            other,
+            enforce_metadata=False,
+            preserve_partition_sizes=True,
+        )
 
     @derived_from(pd.DataFrame)
     def notnull(self):
-        return self.map_partitions(M.notnull, enforce_metadata=False, preserve_partition_sizes=True)
+        return self.map_partitions(
+            M.notnull, enforce_metadata=False, preserve_partition_sizes=True
+        )
 
     @derived_from(pd.DataFrame)
     def isnull(self):
-        return self.map_partitions(M.isnull, enforce_metadata=False, preserve_partition_sizes=True)
+        return self.map_partitions(
+            M.isnull, enforce_metadata=False, preserve_partition_sizes=True
+        )
 
     @derived_from(pd.DataFrame)
     def isna(self):
         if hasattr(pd, "isna"):
-            return self.map_partitions(M.isna, enforce_metadata=False, preserve_partition_sizes=True)
+            return self.map_partitions(
+                M.isna, enforce_metadata=False, preserve_partition_sizes=True
+            )
         else:
             raise NotImplementedError(
                 "Need more recent version of Pandas "
@@ -2526,7 +2600,11 @@ Dask Name: {name}, {task} tasks"""
         # - avoid serializing data in every task
         # - avoid cost of traversal of large list in optimizations
         return self.map_partitions(
-            M.isin, delayed(values), meta=meta, enforce_metadata=False, preserve_partition_sizes=True
+            M.isin,
+            delayed(values),
+            meta=meta,
+            enforce_metadata=False,
+            preserve_partition_sizes=True,
         )
 
     @derived_from(pd.DataFrame)
@@ -2549,7 +2627,11 @@ Dask Name: {name}, {task} tasks"""
         elif is_categorical_dtype(dtype) and getattr(dtype, "categories", None) is None:
             meta = clear_known_categories(meta)
         return self.map_partitions(
-            M.astype, dtype=dtype, meta=meta, enforce_metadata=False, preserve_partition_sizes=True
+            M.astype,
+            dtype=dtype,
+            meta=meta,
+            enforce_metadata=False,
+            preserve_partition_sizes=True,
         )
 
     @derived_from(pd.Series)
@@ -2581,6 +2663,7 @@ Dask Name: {name}, {task} tasks"""
         )
 
         from .multi import maybe_infer_partition_sizes
+
         partition_sizes1 = maybe_infer_partition_sizes(aligned.divisions, self)
         partition_sizes2 = maybe_infer_partition_sizes(aligned.divisions, other)
 
@@ -2592,7 +2675,9 @@ Dask Name: {name}, {task} tasks"""
             for i, key in enumerate(aligned.__dask_keys__())
         }
         dsk1.update(aligned.dask)
-        result1 = new_dd_object(dsk1, name1, meta1, aligned.divisions, partition_sizes=partition_sizes1)
+        result1 = new_dd_object(
+            dsk1, name1, meta1, aligned.divisions, partition_sizes=partition_sizes1
+        )
 
         name2 = "align2-" + token
         dsk2 = {
@@ -2600,7 +2685,9 @@ Dask Name: {name}, {task} tasks"""
             for i, key in enumerate(aligned.__dask_keys__())
         }
         dsk2.update(aligned.dask)
-        result2 = new_dd_object(dsk2, name2, meta2, aligned.divisions, partition_sizes=partition_sizes2)
+        result2 = new_dd_object(
+            dsk2, name2, meta2, aligned.divisions, partition_sizes=partition_sizes2
+        )
 
         return result1, result2
 
@@ -2870,11 +2957,7 @@ class Series(_Frame):
         # (dd.Scalar<size-ag..., dtype=int64>,)
         """
         _len = self._len
-        return (
-            _len
-            if _len is not None
-            else self.size,
-        )
+        return (_len if _len is not None else self.size,)
 
     @property
     def dtype(self):
@@ -2982,7 +3065,9 @@ Dask Name: {name}, {task} tasks""".format(
             res = self if inplace else self.copy()
             res.name = index
         else:
-            res = self.map_partitions(M.rename, index, enforce_metadata=False, preserve_partition_sizes=True)
+            res = self.map_partitions(
+                M.rename, index, enforce_metadata=False, preserve_partition_sizes=True
+            )
             if self.known_divisions:
                 if sorted_index and (callable(index) or is_dict_like(index)):
                     old = pd.Series(range(self.npartitions + 1), index=self.divisions)
@@ -3253,7 +3338,12 @@ Dask Name: {name}, {task} tasks""".format(
 
     @derived_from(pd.Series)
     def to_frame(self, name=None):
-        return self.map_partitions(M.to_frame, name, meta=self._meta.to_frame(name), preserve_partition_sizes=True)
+        return self.map_partitions(
+            M.to_frame,
+            name,
+            meta=self._meta.to_frame(name),
+            preserve_partition_sizes=True,
+        )
 
     @derived_from(pd.Series)
     def to_string(self, max_rows=5):
@@ -3361,7 +3451,14 @@ Dask Name: {name}, {task} tasks""".format(
             warnings.warn(meta_warning(meta))
 
         return map_partitions(
-            M.apply, self, func, convert_dtype, args, meta=meta, preserve_partition_sizes=True, **kwds
+            M.apply,
+            self,
+            func,
+            convert_dtype,
+            args,
+            meta=meta,
+            preserve_partition_sizes=True,
+            **kwds,
         )
 
     @derived_from(pd.Series)
@@ -3495,14 +3592,17 @@ class Index(Series):
                     num -= cur
                 idx += 1
 
-            dsk = {
-                (name, i): (lambda x:x, (self._name, i))
-                for i in range(idx)
-            }
-            dsk[(name, idx)] = (operator.getitem, (self._name, idx), slice(0, partition_sizes[-1]))
+            dsk = {(name, i): (lambda x: x, (self._name, i)) for i in range(idx)}
+            dsk[(name, idx)] = (
+                operator.getitem,
+                (self._name, idx),
+                slice(0, partition_sizes[-1]),
+            )
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
 
-            result = new_dd_object(graph, name, self._meta, self.divisions[:2], partition_sizes)
+            result = new_dd_object(
+                graph, name, self._meta, self.divisions[:2], partition_sizes
+            )
 
         else:
             dsk = {(name, 0): (operator.getitem, (self._name, 0), slice(0, n))}
@@ -3689,7 +3789,9 @@ class DataFrame(_Frame):
             meta = self._meta[_extract_meta(key)]
             dsk = partitionwise_graph(operator.getitem, name, self, key)
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-            return new_dd_object(graph, name, meta, self.divisions, self.partition_sizes)
+            return new_dd_object(
+                graph, name, meta, self.divisions, self.partition_sizes
+            )
 
         elif isinstance(key, slice):
             from pandas.api.types import is_float_dtype
@@ -3721,7 +3823,7 @@ class DataFrame(_Frame):
                     key = np.array(key)
 
                 dtype = key.dtype
-                if dtype == np.dtype('bool'):
+                if dtype == np.dtype("bool"):
                     partition_ends = np.cumsum(self.partition_sizes)
                     assert len(key) == partition_ends[-1]
                     partition_starts = [0] + list(partition_ends[:-1])
@@ -3734,13 +3836,23 @@ class DataFrame(_Frame):
                         partition_sizes.append(size)
 
                     dsk = {
-                        (name, i): (operator.getitem, (self._name, i), partition_keys[i])
+                        (name, i): (
+                            operator.getitem,
+                            (self._name, i),
+                            partition_keys[i],
+                        )
                         for i in range(self.npartitions)
                     }
-                    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-                    return new_dd_object(graph, name, meta, self.divisions, partition_sizes)
+                    graph = HighLevelGraph.from_collections(
+                        name, dsk, dependencies=[self]
+                    )
+                    return new_dd_object(
+                        graph, name, meta, self.divisions, partition_sizes
+                    )
 
-            return new_dd_object(graph, name, meta, self.divisions, self.partition_sizes)
+            return new_dd_object(
+                graph, name, meta, self.divisions, self.partition_sizes
+            )
 
         if isinstance(key, Series):
             return map_partitions(operator.getitem, self, key, meta=self._meta)
@@ -4508,7 +4620,15 @@ class DataFrame(_Frame):
             )
             warnings.warn(meta_warning(meta))
 
-        return map_partitions(M.apply, self, func, args=args, meta=meta, preserve_partition_sizes=True, **kwds)
+        return map_partitions(
+            M.apply,
+            self,
+            func,
+            args=args,
+            meta=meta,
+            preserve_partition_sizes=True,
+            **kwds,
+        )
 
     @derived_from(pd.DataFrame)
     def applymap(self, func, meta="__no_default__"):
@@ -4544,7 +4664,9 @@ class DataFrame(_Frame):
         graph = HighLevelGraph.from_collections(
             name, dsk, dependencies=mode_series_list
         )
-        ddf = new_dd_object(graph, name, meta, divisions=(None, None))  # TODO: partition_sizes
+        ddf = new_dd_object(
+            graph, name, meta, divisions=(None, None)
+        )  # TODO: partition_sizes
 
         return ddf
 
@@ -4931,7 +5053,9 @@ def elemwise(op, *args, **kwargs):
 
     original_args = args
     args = _maybe_align_partitions(args)
-    partitions_already_aligned = args is original_args  # TODO: is this a valid way to test whether partitions were already aligned?
+    partitions_already_aligned = (
+        args is original_args
+    )  # TODO: is this a valid way to test whether partitions were already aligned?
 
     dasks = [arg for arg in args if isinstance(arg, (_Frame, Scalar, Array))]
     dfs = [df for df in dasks if isinstance(df, _Frame)]
@@ -4955,7 +5079,9 @@ def elemwise(op, *args, **kwargs):
 
     divisions = dfs[0].divisions
     if transform_divisions and isinstance(dfs[0], Index) and len(dfs) == 1:
-        partitions_already_aligned = False  # TODO: not sure about partition-size implications of this block
+        partitions_already_aligned = (
+            False  # TODO: not sure about partition-size implications of this block
+        )
         try:
             divisions = op(
                 *[pd.Index(arg.divisions) if arg is dfs[0] else arg for arg in args],
@@ -5003,7 +5129,9 @@ def elemwise(op, *args, **kwargs):
     partition_sizes = None
     if partitions_already_aligned:
         partition_sizes = dfs[0].partition_sizes
-    result = new_dd_object(graph, _name, meta, divisions, partition_sizes=partition_sizes)
+    result = new_dd_object(
+        graph, _name, meta, divisions, partition_sizes=partition_sizes
+    )
     return handle_out(out, result)
 
 
@@ -5469,12 +5597,14 @@ def map_partitions(
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=dependencies)
     if preserve_partition_sizes:
         from .multi import maybe_infer_partition_sizes
+
         partition_sizes = maybe_infer_partition_sizes(divisions, dfs[0])
 
         # Want to check whether divisions are unchanged below, ignoring changes betwwn null variants (e.g. None -> NaT)
         from pandas import isnull
+
         def normalize(divs):
-            return [ None if isnull(d) else d for d in divs ]
+            return [None if isnull(d) else d for d in divs]
 
         if normalize(divisions) == normalize(dfs[0].divisions):
             if partition_sizes is None:
@@ -5484,13 +5614,25 @@ def map_partitions(
                 partition_sizes = dfs[0].partition_sizes
         else:
             warnings.warn(
-                "Expected partitions to be preserved, but partition-realignment detected:\ndivisions: %s\n\tBefore: \n\t\t%s\n\tAfter:\n\t\t%s\npartition_sizes: %s\n\tBefore:\n\t\t%s\n\tAfter:\n\t\t%s" % (
+                "Expected partitions to be preserved, but partition-realignment detected:\ndivisions: %s\n\tBefore: \n\t\t%s\n\tAfter:\n\t\t%s\npartition_sizes: %s\n\tBefore:\n\t\t%s\n\tAfter:\n\t\t%s"
+                % (
                     str(divisions),
-                    '\n\t\t'.join([ str(getattr(arg, 'divisions', None)) for arg in unaligned_args ]),
-                    '\n\t\t'.join([ str(getattr(arg, 'divisions', None)) for arg in args ]),
+                    "\n\t\t".join(
+                        [str(getattr(arg, "divisions", None)) for arg in unaligned_args]
+                    ),
+                    "\n\t\t".join(
+                        [str(getattr(arg, "divisions", None)) for arg in args]
+                    ),
                     str(partition_sizes),
-                    '\n\t\t'.join([ str(getattr(arg, 'partition_sizes', None)) for arg in unaligned_args ]),
-                    '\n\t\t'.join([ str(getattr(arg, 'partition_sizes', None)) for arg in args ]),
+                    "\n\t\t".join(
+                        [
+                            str(getattr(arg, "partition_sizes", None))
+                            for arg in unaligned_args
+                        ]
+                    ),
+                    "\n\t\t".join(
+                        [str(getattr(arg, "partition_sizes", None)) for arg in args]
+                    ),
                 )
             )
     else:
@@ -5587,7 +5729,9 @@ def _rename_dask(df, names):
 
     dsk = partitionwise_graph(_rename, name, metadata, df)
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[df])
-    return new_dd_object(graph, name, metadata, df.divisions, partition_sizes=df.partition_sizes)
+    return new_dd_object(
+        graph, name, metadata, df.divisions, partition_sizes=df.partition_sizes
+    )
 
 
 def quantile(df, q, method="default"):
@@ -6153,8 +6297,10 @@ def repartition_size(df, size):
 
 
 def repartition_sizes(df, sizes):
-    if not hasattr(df, 'partition_sizes'):
-        raise ValueError("Can't repartition %s based on partition_sizes, don't know existing partition sizes")
+    if not hasattr(df, "partition_sizes"):
+        raise ValueError(
+            "Can't repartition %s based on partition_sizes, don't know existing partition sizes"
+        )
     partition_sizes = df.partition_sizes
     if partition_sizes == sizes:
         return df
@@ -6163,17 +6309,18 @@ def repartition_sizes(df, sizes):
     if partition_sizes is not None:
         cur_len = sum(partition_sizes)
         if cur_len != nxt_len:
-            raise ValueError("Current len doesn't match new len: %d != %d" % (cur_len, nxt_len))
+            raise ValueError(
+                "Current len doesn't match new len: %d != %d" % (cur_len, nxt_len)
+            )
 
     new_idxs = [0] + np.cumsum(sizes).tolist()
 
     slices = [
-        df \
-            .iloc[new_idxs[i]:new_idxs[i+1]] \
-            .repartition(npartitions=1)
+        df.iloc[new_idxs[i] : new_idxs[i + 1]].repartition(npartitions=1)
         for i in range(len(sizes))
     ]
     from dask.dataframe import concat
+
     result = concat(slices)
     result.partition_sizes = tuple(sizes)  # TODO: push this into the concat machinery
     return result
@@ -6254,13 +6401,13 @@ def _repartition_from_boundaries(df, new_partitions_boundaries, new_name):
     partition_idx_starts = df.partition_idx_starts
     if partition_idx_starts:
         partition_idx_bounds = df.partition_idx_starts + (df._len,)
-        new_partition_idx_bounds = [ partition_idx_bounds[i] for i in new_partitions_boundaries ]
+        new_partition_idx_bounds = [
+            partition_idx_bounds[i] for i in new_partitions_boundaries
+        ]
         partition_sizes = [
             end - start
-            for start, end
-            in zip(
-                new_partition_idx_bounds[:-1],
-                new_partition_idx_bounds[1:]
+            for start, end in zip(
+                new_partition_idx_bounds[:-1], new_partition_idx_bounds[1:]
             )
         ]
     else:
@@ -6268,7 +6415,9 @@ def _repartition_from_boundaries(df, new_partitions_boundaries, new_name):
 
     divisions = [df.divisions[i] for i in new_partitions_boundaries]
     graph = HighLevelGraph.from_collections(new_name, dsk, dependencies=[df])
-    return new_dd_object(graph, new_name, df._meta, divisions, partition_sizes=partition_sizes)
+    return new_dd_object(
+        graph, new_name, df._meta, divisions, partition_sizes=partition_sizes
+    )
 
 
 def _split_partitions(df, nsplits, new_name):
@@ -6346,9 +6495,12 @@ def repartition(df, divisions=None, force=False):
             df.divisions, divisions, df._name, tmp, out, force=force
         )
         from .multi import maybe_infer_partition_sizes
+
         partition_sizes = maybe_infer_partition_sizes(divisions, df)
         graph = HighLevelGraph.from_collections(out, dsk, dependencies=[df])
-        return new_dd_object(graph, out, df._meta, divisions, partition_sizes=partition_sizes)
+        return new_dd_object(
+            graph, out, df._meta, divisions, partition_sizes=partition_sizes
+        )
     elif is_dataframe_like(df) or is_series_like(df):
         name = "repartition-dataframe-" + token
         from .utils import shard_df_on_index
@@ -6496,13 +6648,22 @@ def to_datetime(arg, meta=None, **kwargs):
             meta = pd.Series([pd.Timestamp("2000")])
             meta.index = meta.index.astype(arg.index.dtype)
             meta.index.name = arg.index.name
-    return map_partitions(pd.to_datetime, arg, meta=meta, preserve_partition_sizes=True, **kwargs)
+    return map_partitions(
+        pd.to_datetime, arg, meta=meta, preserve_partition_sizes=True, **kwargs
+    )
 
 
 @wraps(pd.to_timedelta)
 def to_timedelta(arg, unit="ns", errors="raise"):
     meta = pd.Series([pd.Timedelta(1, unit=unit)])
-    return map_partitions(pd.to_timedelta, arg, unit=unit, errors=errors, meta=meta, preserve_partition_sizes=True)
+    return map_partitions(
+        pd.to_timedelta,
+        arg,
+        unit=unit,
+        errors=errors,
+        meta=meta,
+        preserve_partition_sizes=True,
+    )
 
 
 if hasattr(pd, "isna"):
@@ -6582,9 +6743,7 @@ def new_dd_object(dsk, name, meta, divisions, partition_sizes=None):
         else:
             chunks0 = (np.nan,) * (len(divisions) - 1)
 
-        chunks = (chunks0,) + tuple(
-            (d,) for d in meta.shape[1:]
-        )
+        chunks = (chunks0,) + tuple((d,) for d in meta.shape[1:])
         if len(chunks) > 1:
             layer = dsk.layers[name]
             if isinstance(layer, Blockwise):
