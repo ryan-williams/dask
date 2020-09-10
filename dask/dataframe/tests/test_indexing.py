@@ -318,7 +318,7 @@ def test_series_getitem_slice():
     ddf = dd.from_pandas(df, 3)
     A = ddf.A
     C = ddf.C
-    assert_eq(ddf.A[C], df.A[df.C])
+    assert_eq(A[C], df.A[df.C])
     # Slicing doesn't require equal divisions; alignment flow sorts it out
     C2 = C.repartition(divisions=("a", "e", "i"))
     assert_eq(ddf.A[C2], df.A[df.C])

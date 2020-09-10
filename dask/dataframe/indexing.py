@@ -5,8 +5,7 @@ import bisect
 import numpy as np
 import pandas as pd
 
-import dask.dataframe as dd
-from .core import new_dd_object, Series, partitionwise_graph, Index
+from .core import new_dd_object, Series, Index
 from ..array.core import Array
 from .utils import is_index_like, meta_nonempty
 from . import methods
@@ -68,18 +67,23 @@ class _iLocIndexer(_IndexerBase):
             )
 
         partition_sizes = obj.partition_sizes
-        if isinstance(
-            iindexer, Series
-        ):  # and self.divisions == key.divisions:  # and self.known_divisions:
+        if isinstance(iindexer, Series):
+            # TODO: something like this might work for applicable cases:
+            # if self.divisions == key.divisions:  # and self.known_divisions:
+            #     name = "index-%s" % tokenize(self.obj, iindexer)
+            #     import operator
+            #     dsk = partitionwise_graph(operator.getitem, name, self.obj, iindexer)
+            #     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self.obj, iindexer])
+            #     return dd.DataFrame(
+            #         graph,name,
+            #         self.obj._meta,
+            #         self.obj.divisions,
+            #         partition_sizes=self.obj.partition_sizes,
+            #     )
+            # else:
             if iindexer.dtype == np.dtype(int):
                 raise Exception("not implemented")
-                """
-                name = "index-%s" % tokenize(self.obj, iindexer)
-                import operator
-                dsk = partitionwise_graph(operator.getitem, name, self.obj, iindexer)
-                graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self.obj, iindexer])
-                return dd.DataFrame(graph, name, self.obj._meta, self.obj.divisions, partition_sizes=self.obj.partition_sizes)
-                """
+
             elif iindexer.dtype == np.dtype(bool):
                 return obj.loc[iindexer, cindexer]
             else:
@@ -88,13 +92,16 @@ class _iLocIndexer(_IndexerBase):
                 )
         elif not (isinstance(iindexer, slice) and iindexer == slice(None)):
             if not partition_sizes:
-                print("")
-                # raise NotImplementedError("%s.iloc only supported for %s with known partition_sizes" % obj.__class__.__name__)
+                raise NotImplementedError(
+                    "%s.iloc only supported for %s with known partition_sizes"
+                    % obj.__class__.__name__
+                )
 
             _len = obj._len
 
             if isinstance(iindexer, slice):
-                start, stop, step = (
+                # TODO: use step-size here?
+                start, stop, _ = (
                     (iindexer.start or 0),
                     (iindexer.stop if iindexer.stop is not None else _len),
                     (iindexer.step or 1),
@@ -116,7 +123,8 @@ class _iLocIndexer(_IndexerBase):
                 ]
 
                 if not partition_data:
-                    # The passed slice either begins after obj's end, or is empty and falls at a partition boundary (e.g. 0:0, N:N for N == partition_sizes[0], etc.)
+                    # The passed slice either begins after obj's end, or is empty and falls at a partition
+                    # boundary (e.g. 0:0, N:N for N == partition_sizes[0], etc.)
                     if m > _len:
                         partition_data = [
                             dict(

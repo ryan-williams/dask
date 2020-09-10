@@ -4055,8 +4055,6 @@ def elemwise(op, *args, **kwargs):
 
     args = [np.asarray(a) if isinstance(a, (list, tuple)) else a for a in args]
 
-    from ..dataframe import _Frame
-
     shapes = []
     for arg in args:
         shape = getattr(arg, "shape", ())

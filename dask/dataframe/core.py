@@ -337,6 +337,12 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
     def _constructor(self):
         return new_dd_object
 
+    def persist(self, **kwargs):
+        result = DaskMethodsMixin.persist(self, **kwargs)
+        result.divisions = self.divisions
+        result.partition_sizes = self.partition_sizes
+        return result
+
     @property
     def npartitions(self):
         """Return number of partitions"""
@@ -527,7 +533,7 @@ Dask Name: {name}, {task} tasks"""
             name = "default-index-%s" % tokenize(partition_sizes)
             partition_idx_starts = result.partition_idx_starts
             _len = result._len
-            divisions = partition_idx_starts + (_len - 1,)
+            divisions = partition_idx_starts + (max(0, _len - 1),)
 
             from pandas import RangeIndex
 
@@ -554,6 +560,7 @@ Dask Name: {name}, {task} tasks"""
                 result = result.to_frame().set_index(
                     index, drop=True, sorted=True, divisions=divisions
                 )[result.name]
+            result.partition_sizes = partition_sizes
         else:
             result = result.clear_divisions()
         return result
@@ -1124,7 +1131,7 @@ Dask Name: {name}, {task} tasks"""
 
         partition_sizes = None
         if self.partition_sizes:
-            partition_sizes = self.partition_sizes[:npartitions]
+            partition_sizes = list(self.partition_sizes[:npartitions])
             num_elems = sum(partition_sizes)
             idx = npartitions - 1
             while num_elems > n and idx >= 0:
@@ -1215,12 +1222,14 @@ Dask Name: {name}, {task} tasks"""
         divisions = [self.divisions[i] for _, i in new_keys] + [
             self.divisions[new_keys[-1][1] + 1]
         ]
+        if self.partition_sizes:
+            partition_sizes = [self.partition_sizes[i] for _, i in new_keys]
+        else:
+            partition_sizes = None
         dsk = {(name, i): tuple(key) for i, key in enumerate(new_keys)}
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(
-            graph, name, self._meta, divisions
-        )  # TODO: partition_sizes
+        return new_dd_object(graph, name, self._meta, divisions, partition_sizes)
 
     @property
     def partitions(self):
@@ -2005,8 +2014,8 @@ Dask Name: {name}, {task} tasks"""
                 enforce_metadata=False,
             )
             if isinstance(self, DataFrame):
-                result.divisions = (self.columns.min(), self.columns.max())
-                result.partition_sizes = (len(self.columns),)
+                result.divisions = (num.columns.min(), num.columns.max())
+                result.partition_sizes = (len(num.columns),)
             return handle_out(out, result)
 
     @derived_from(pd.DataFrame)
@@ -2049,7 +2058,6 @@ Dask Name: {name}, {task} tasks"""
 
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
-                result.partition_sizes = (len(self.columns),)
             return handle_out(out, result)
 
     def _var_numeric(self, skipna=True, ddof=1, split_every=False):
@@ -2074,7 +2082,11 @@ Dask Name: {name}, {task} tasks"""
         graph = HighLevelGraph.from_collections(name, layer, dependencies=[array_var])
 
         return new_dd_object(
-            graph, name, num._meta_nonempty.var(), divisions=[None, None]
+            graph,
+            name,
+            num._meta_nonempty.var(),
+            divisions=[None, None],
+            partition_sizes=(len(num.columns),),
         )
 
     def _var_timedeltas(self, skipna=True, ddof=1, split_every=False):
@@ -2102,7 +2114,11 @@ Dask Name: {name}, {task} tasks"""
         )
 
         return new_dd_object(
-            graph, name, timedeltas._meta_nonempty.var(), divisions=[None, None]
+            graph,
+            name,
+            timedeltas._meta_nonempty.var(),
+            divisions=[None, None],
+            partition_sizes=(len(timedeltas.columns),),
         )
 
     def _var_mixed(self, skipna=True, ddof=1, split_every=False):
@@ -2126,7 +2142,11 @@ Dask Name: {name}, {task} tasks"""
             name, layer, dependencies=[numeric_vars, timedelta_vars]
         )
         return new_dd_object(
-            graph, name, self._meta_nonempty.var(), divisions=[None, None]
+            graph,
+            name,
+            self._meta_nonempty.var(),
+            divisions=[None, None],
+            partition_sizes=(len(data.columns),),
         )
 
     def _var_1d(self, column, skipna=True, ddof=1, split_every=False):
@@ -2156,7 +2176,11 @@ Dask Name: {name}, {task} tasks"""
         graph = HighLevelGraph.from_collections(name, layer, dependencies=[array_var])
 
         return new_dd_object(
-            graph, name, column._meta_nonempty.var(), divisions=[None, None]
+            graph,
+            name,
+            column._meta_nonempty.var(),
+            divisions=[None, None],
+            partition_sizes=(1,),
         )
 
     @derived_from(pd.DataFrame)
@@ -2215,7 +2239,7 @@ Dask Name: {name}, {task} tasks"""
 
             if isinstance(self, DataFrame):
                 result.divisions = (self.columns.min(), self.columns.max())
-                result.partition_sizes = (len(self.columns),)
+                result.partition_sizes = (len(num.columns),)
             return result
 
     def quantile(self, q=0.5, axis=0, method="default"):
@@ -2664,8 +2688,24 @@ Dask Name: {name}, {task} tasks"""
 
         from .multi import maybe_infer_partition_sizes
 
-        partition_sizes1 = maybe_infer_partition_sizes(aligned.divisions, self)
-        partition_sizes2 = maybe_infer_partition_sizes(aligned.divisions, other)
+        if join == "left":
+            out_size_guide = self
+        elif join == "right":
+            out_size_guide = other
+        else:
+            out_size_guide = None
+
+        if axis in [1, "1", "columns"]:
+            out_size_guides = (self, other)
+        else:
+            out_size_guides = (out_size_guide, out_size_guide)
+
+        partition_sizes1 = maybe_infer_partition_sizes(
+            aligned.divisions, out_size_guides[0]
+        )
+        partition_sizes2 = maybe_infer_partition_sizes(
+            aligned.divisions, out_size_guides[1]
+        )
 
         token = tokenize(self, other, join, axis, fill_value)
 
@@ -5614,25 +5654,38 @@ def map_partitions(
                 partition_sizes = dfs[0].partition_sizes
         else:
             warnings.warn(
-                "Expected partitions to be preserved, but partition-realignment detected:\ndivisions: %s\n\tBefore: \n\t\t%s\n\tAfter:\n\t\t%s\npartition_sizes: %s\n\tBefore:\n\t\t%s\n\tAfter:\n\t\t%s"
-                % (
-                    str(divisions),
-                    "\n\t\t".join(
-                        [str(getattr(arg, "divisions", None)) for arg in unaligned_args]
-                    ),
-                    "\n\t\t".join(
-                        [str(getattr(arg, "divisions", None)) for arg in args]
-                    ),
-                    str(partition_sizes),
-                    "\n\t\t".join(
-                        [
-                            str(getattr(arg, "partition_sizes", None))
-                            for arg in unaligned_args
-                        ]
-                    ),
-                    "\n\t\t".join(
-                        [str(getattr(arg, "partition_sizes", None)) for arg in args]
-                    ),
+                "\n".join(
+                    [
+                        "Expected partitions to be preserved, but partition-realignment detected:",
+                        "divisions: %s" % str(divisions),
+                        "\tBefore:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [
+                                str(getattr(arg, "divisions", None))
+                                for arg in unaligned_args
+                            ]
+                        ),
+                        "\tAfter:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [str(getattr(arg, "divisions", None)) for arg in args]
+                        ),
+                        "partition_sizes: %s" % str(partition_sizes),
+                        "\tBefore:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [
+                                str(getattr(arg, "partition_sizes", None))
+                                for arg in unaligned_args
+                            ]
+                        ),
+                        "\tAfter:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [str(getattr(arg, "partition_sizes", None)) for arg in args]
+                        ),
+                    ]
                 )
             )
     else:

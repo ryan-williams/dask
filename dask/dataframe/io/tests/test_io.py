@@ -375,7 +375,9 @@ def test_from_dask_array_index(as_frame):
     if as_frame:
         s = s.to_frame()
     result = dd.from_dask_array(s.values, index=s.index)
-    assert_eq(s, result)
+    assert_eq(
+        s, result, check_partition_sizes=False
+    )  # TODO: from_dask-array partition_sizes
 
 
 def test_from_dask_array_index_raises():

@@ -234,8 +234,8 @@ def test_partition_sizes():
         assert series.partition_sizes == (34, 34, 32)
 
     evens = df.len % 2 == 0
-    assert df[evens].partition_sizes == None
-    assert evens[evens].partition_sizes == None
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
 
     # def test_array_series_slice():
     from dask.array import from_array
@@ -285,8 +285,8 @@ def test_repartition_sizes():
     assert len(df.compute()) == 100
 
     evens = df.len % 2 == 0
-    assert df[evens].partition_sizes == None
-    assert evens[evens].partition_sizes == None
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
 
     df2 = df.repartition(partition_sizes=(40, 40, 20))
     from pandas.testing import assert_frame_equal
@@ -1000,7 +1000,7 @@ def test_where_mask():
         (ddf5, pdf6, pdf5, pdf6),
     ]
 
-    for ddf, ddcond, pdf, pdcond in cases:
+    for idx, (ddf, ddcond, pdf, pdcond) in enumerate(cases):
         assert isinstance(ddf, dd.DataFrame)
         assert isinstance(ddcond, (dd.DataFrame, pd.DataFrame))
         assert isinstance(pdf, pd.DataFrame)
@@ -1166,7 +1166,7 @@ def test_metadata_inference_single_partition_aligned_args():
         assert len(df) > 0
         return df
 
-    res = dd.map_partitions(check, ddf, ddf.x)
+    res = dd.map_partitions(check, ddf, ddf.x, preserve_partition_sizes=True)
     assert_eq(res, ddf)
 
 
@@ -2097,7 +2097,7 @@ def test_repartition_npartitions(use_index, n, k, dtype, transform):
         check_partition_sizes(b, None)
     else:
         check_partition_sizes(b)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
     assert b.npartitions == k
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -2115,7 +2115,7 @@ def test_repartition_partition_size(use_index, n, partition_size, transform):
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
     b = a.repartition(partition_size=partition_size)
-    assert_eq(a, b, check_divisions=False)
+    assert_eq(a, b, check_divisions=False, check_partition_sizes=False)
     assert np.alltrue(b.map_partitions(total_mem_usage, deep=True).compute() <= 1024)
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -2152,7 +2152,7 @@ def test_repartition_npartitions_numeric_edge_case():
     a = dd.from_pandas(df, npartitions=15)
     assert a.npartitions == 15
     b = a.repartition(npartitions=11)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
 
 
 def test_repartition_object_index():
