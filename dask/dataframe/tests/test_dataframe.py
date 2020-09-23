@@ -1942,7 +1942,7 @@ def test_repartition():
             [compute_as_if_collection(dd.DataFrame, d.dask, k) for k in keys]
         )
         assert_eq(orig, sp)
-        assert_eq(orig, d)
+        assert_eq(orig, d, check_partition_sizes=False)
 
     df = pd.DataFrame(
         {"x": [1, 2, 3, 4, 5, 6], "y": list("abdabd")}, index=[10, 20, 30, 40, 50, 60]
@@ -1951,7 +1951,7 @@ def test_repartition():
 
     b = a.repartition(divisions=[10, 20, 50, 60])
     assert b.divisions == (10, 20, 50, 60)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
     assert_eq(compute_as_if_collection(dd.DataFrame, b.dask, (b._name, 0)), df.iloc[:1])
 
     for div in [
