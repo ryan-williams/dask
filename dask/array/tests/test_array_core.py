@@ -54,6 +54,7 @@ from dask.array.utils import assert_eq, same_keys
 from dask.array.numpy_compat import _numpy_120
 
 from numpy import nancumsum, nancumprod
+from numpy.testing import assert_almost_equal
 
 
 def test_getem():
@@ -4474,3 +4475,45 @@ def test_rechunk_auto():
     y = x.rechunk()
 
     assert y.npartitions == 1
+
+
+@pytest.mark.parametrize("fmt", ['csr','csc','coo',])
+@pytest.mark.parametrize("axis", [0, 1, None,])
+@pytest.mark.parametrize("keepdims", [None, False, True,])
+def test_scipy_sparse_sum(fmt, axis, keepdims):
+    pytest.importorskip("scipy.sparse")
+    from scipy.sparse import coo_matrix, csc_matrix, csr_matrix, random
+
+    fmt_map = {
+        'coo': coo_matrix,
+        'csc': csc_matrix,
+        'csr': csr_matrix,
+    }
+    fmt_cls = fmt_map[fmt]
+
+    M, N = 100, 100
+    m, n =  20,  10
+    if fmt == 'coo':
+        spmat = random(M, N, format='csr')
+        x = da.from_array(spmat, chunks=(m,n), asarray=False).map_blocks(coo_matrix)
+    else:
+        spmat = random(M, N, format=fmt)
+        assert isinstance(spmat, fmt_cls)
+        x = da.from_array(spmat, chunks=(m,n), asarray=False)
+
+    block_typenames = x.map_blocks(lambda c: np.array([[type(c).__name__]]), dtype=object).compute()
+    expected = np.full(((M+m-1)//m, (N+n-1)//n), '%s_matrix' % fmt)
+    assert_eq(block_typenames, expected)
+
+    xx = x.compute()
+    # All spmatrices come out of Dask as COOs, since that's the only(?) format that can easily
+    # concatenate along either axis
+    assert isinstance(xx, coo_matrix)
+    assert (spmat != xx).nnz == 0
+
+    dask_sum = x.sum(axis=axis).compute()
+    spmat_sum = spmat.sum(axis=axis)
+    if axis == 0:
+        pytest.xfail("TODO: default to keepdims=True behavior at the dask level when _meta is spmatrix and first dimension is being summed over")
+    else:
+        assert_almost_equal(dask_sum, spmat_sum)
