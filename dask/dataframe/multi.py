@@ -150,11 +150,13 @@ def align_partitions(*dfs):
 
 
 def maybe_infer_partition_sizes(divisions, prev):
-    if not prev.partition_sizes or not prev.known_divisions:
+    if prev is None or not prev.partition_sizes or not prev.known_divisions:
         return None
     partition_bounds = [0] + np.cumsum(prev.partition_sizes).tolist()[:-1]
     _len = prev._len
-    division_idx_map = { division: idx for idx, division in zip(partition_bounds, prev.divisions[:-1]) }
+    division_idx_map = {
+        division: idx for idx, division in zip(partition_bounds, prev.divisions[:-1])
+    }
     m = min(prev.divisions)
     M = max(prev.divisions)
 
@@ -164,12 +166,14 @@ def maybe_infer_partition_sizes(divisions, prev):
             idxs.append(division_idx_map[division])
         elif division < m:
             idxs.append(0)
-        elif division > M or division == M: #and idx + 1 == len(divisions):
+        elif (
+            division > M or division == M and idx + 1 == len(divisions)
+        ):  # final division is inclusive, so only admissible when it is both sides' final division
             idxs.append(_len)
         else:
             return None
     idxs.append(_len)
-    sizes = [ end - start for start, end in zip(idxs[:-1], idxs[1:]) ]
+    sizes = [end - start for start, end in zip(idxs[:-1], idxs[1:])]
     return sizes
 
 
@@ -872,7 +876,9 @@ def merge_asof(
             if divs is not None:
                 result = result.set_index(ixcol, sorted=True, divisions=divs)
             else:
-                result = result.map_partitions(M.set_index, ixcol, preserve_partitions=True)
+                result = result.map_partitions(
+                    M.set_index, ixcol, preserve_partition_sizes=True
+                )
             result = result.map_partitions(M.rename_axis, ixname)
 
     return result
@@ -930,13 +936,30 @@ def concat_indexed_dataframes(dfs, axis=0, join="outer", **kwargs):
     for df in dfs2:
         dsk.update(df.dask)
 
-    if \
-        len(set([ tuple(df.divisions) for df in dfs if df.divisions is not None ])) == 1 and \
-        len(set([ tuple(df.partition_sizes) for df in dfs if df.partition_sizes is not None ])) == 1:
-        partition_sizes = dfs[0].partition_sizes
-        assert dfs[0].divisions == dfs2[0].divisions
+    # In general, we don't know what the result's partition_sizes will be, but there are a few cases where we do:
+    all_divisions = list(set([df.divisions for df in dfs]))
+    if len(all_divisions) == 1 and all_divisions[0] is not None:
+        if axis in [1, "1", "columns"]:
+            # When concatenating columns, only infer partition_sizes if they are all equal (in which case we copy
+            # that partition_sizes value)
+            distinct_partition_sizes = list(set([df.partition_sizes for df in dfs]))
+            if len(distinct_partition_sizes) == 1:
+                partition_sizes = distinct_partition_sizes[0]
+            else:
+                partition_sizes = None
+        else:
+            if all([df.partition_sizes is not None for df in dfs]):
+                # If all dataframes have the same divisions and known partition_sizes, the result's partition_sizes
+                # will be the partition-wise sums of each dataframe's respective partition_sizes
+                partition_sizes = tuple(
+                    sum(partitions)
+                    for partitions in zip(*[df.partition_sizes for df in dfs])
+                )
+            else:
+                partition_sizes = None
     else:
         partition_sizes = None
+
     return new_dd_object(dsk, name, meta, divisions, partition_sizes=partition_sizes)
 
 
@@ -1136,8 +1159,10 @@ def concat(
     else:
         if all(df.known_divisions for df in dasks):
             # each DataFrame's division must be greater than previous one
-            xpr = [dfs[i].divisions[-1] < dfs[i + 1].divisions[0] for i in range(len(dfs) - 1)]
-            if all(xpr):
+            if all(
+                dfs[i].divisions[-1] < dfs[i + 1].divisions[0]
+                for i in range(len(dfs) - 1)
+            ):
                 divisions = []
                 for df in dfs[:-1]:
                     # remove last to concatenate with next

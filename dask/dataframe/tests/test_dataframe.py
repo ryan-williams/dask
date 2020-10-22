@@ -208,14 +208,20 @@ def test_attributes():
 
 
 def test_partition_sizes():
-    df = dd.from_pandas(pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ]), npartitions=3)
-    assert df.partition_sizes == [34,34,32]
+    df = dd.from_pandas(
+        pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)]), npartitions=3
+    )
+    assert df.partition_sizes == (34, 34, 32)
     df["len"] = df.i.map(len)
-    assert df.partition_sizes == [34,34,32]
-    assert df['len'].partition_sizes == [34,34,32]
-    assert df['i'].partition_sizes == [34,34,32]
+    assert df.partition_sizes == (34, 34, 32)
+    assert df["len"].partition_sizes == (34, 34, 32)
+    assert df["i"].partition_sizes == (34, 34, 32)
     assert len(df.compute()) == 100
-    assert [ len(partition.compute(scheduler='single-threaded')) for partition in df.partitions ] == [34,34,32]
+    assert tuple(len(partition.compute()) for partition in df.partitions) == (
+        34,
+        34,
+        32,
+    )
 
     for series in [
         df.len + 2,
@@ -225,19 +231,21 @@ def test_partition_sizes():
         df.len % 2,
         df.len % 2 == 0,
     ]:
-        assert series.partition_sizes == [34,34,32]
+        assert series.partition_sizes == (34, 34, 32)
 
     evens = df.len % 2 == 0
-    assert df[evens].partition_sizes == [34,34,32]
-    assert evens[evens].partition_sizes == [34,34,32]
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
 
     # def test_array_series_slice():
     from dask.array import from_array
     from numpy import array
-    a = array(range(1100)).reshape((100,11))
-    d = from_array(a, chunks=(23,4))
-    assert d.chunks == ((23,23,23,23,8), (4,4,3))
+
+    a = array(range(1100)).reshape((100, 11))
+    d = from_array(a, chunks=(23, 4))
+    assert d.chunks == ((23, 23, 23, 23, 8), (4, 4, 3))
     from numpy.testing import assert_array_equal
+
     dask_sliced = d[evens]
     np_sliced = a[evens.compute()]
     assert_array_equal(dask_sliced.compute(), np_sliced)
@@ -251,124 +259,127 @@ def check_partition_sizes(df, *args, **kwargs):
             partition_sizes = args[0]
         else:
             assert not args
-            assert 'partition_sizes' in kwargs
-            partition_sizes = kwargs.pop('partition_sizes')
+            assert "partition_sizes" in kwargs
+            partition_sizes = kwargs.pop("partition_sizes")
             assert not kwargs
         assert df.partition_sizes == partition_sizes
         if partition_sizes is not None:
-            #df.map_partitions(len)
-            computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
-            actual_sizes = [ len(partition) for partition in computed ]
+            computed = compute(*[partition for partition in df.partitions])
+            actual_sizes = tuple(len(partition) for partition in computed)
             assert actual_sizes == partition_sizes
     else:
-        computed = compute(*[ partition for partition in df.partitions ], scheduler='sync')
-        partition_sizes = [ len(partition) for partition in computed ]
+        computed = compute(*[partition for partition in df.partitions])
+        partition_sizes = tuple(len(partition) for partition in computed)
         assert partition_sizes == df.partition_sizes
 
 
 def test_repartition_sizes():
-    df = dd.from_pandas(pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ]), npartitions=3)
-    check_partition_sizes(df, [34,34,32])
+    df = dd.from_pandas(
+        pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)]), npartitions=3
+    )
+    check_partition_sizes(df, (34, 34, 32))
     df["len"] = df.i.map(len)
-    assert df.partition_sizes == [34,34,32]
-    assert df['len'].partition_sizes == [34,34,32]
-    assert df['i'].partition_sizes == [34,34,32]
+    assert df.partition_sizes == (34, 34, 32)
+    assert df["len"].partition_sizes == (34, 34, 32)
+    assert df["i"].partition_sizes == (34, 34, 32)
     assert len(df.compute()) == 100
 
     evens = df.len % 2 == 0
-    assert df[evens].partition_sizes == [34,34,32]
-    assert evens[evens].partition_sizes == [34,34,32]
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
 
-    df2 = df.repartition(partition_sizes=[40,40,20])
+    df2 = df.repartition(partition_sizes=(40, 40, 20))
     from pandas.testing import assert_frame_equal
+
     assert_frame_equal(df.compute(), df2.compute())
-    check_partition_sizes(df2, [40,40,20])
+    check_partition_sizes(df2, (40, 40, 20))
 
-    df3 = df.repartition(partition_sizes=[10]*10)
+    df3 = df.repartition(partition_sizes=[10] * 10)
     from pandas.testing import assert_frame_equal
+
     assert_frame_equal(df.compute(), df3.compute())
-    check_partition_sizes(df3, [10]*10)
+    check_partition_sizes(df3, (10,) * 10)
 
 
 def test_iloc():
-    df = pd.DataFrame([ { 'i': f'{i}{i}' } for i in range(100) ])
+    df = pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
     ddf = dd.from_pandas(df, npartitions=3)
-    assert ddf.partition_sizes == [34,34,32]
+    assert ddf.partition_sizes == (34, 34, 32)
     from pandas.testing import assert_frame_equal, assert_series_equal
 
     def checks(dask, pandas, cmp):
         def check(fn):
-            cmp(fn(dask).compute(scheduler='sync'), fn(pandas))
+            cmp(fn(dask).compute(), fn(pandas))
 
-        check(lambda df: df.iloc[    : 100])
-        check(lambda df: df.iloc[    :    ])
-        check(lambda df: df.iloc[   0: 100])
+        check(lambda df: df.iloc[:100])
+        check(lambda df: df.iloc[:])
+        check(lambda df: df.iloc[0:100])
 
-        check(lambda df: df.iloc[    :  34])
-        check(lambda df: df.iloc[   0:  34])
-        check(lambda df: df.iloc[  10:  34])
+        check(lambda df: df.iloc[:34])
+        check(lambda df: df.iloc[0:34])
+        check(lambda df: df.iloc[10:34])
 
-        check(lambda df: df.iloc[  10:  24])
+        check(lambda df: df.iloc[10:24])
 
-        check(lambda df: df.iloc[    :  10])
-        check(lambda df: df.iloc[   0:  10])
+        check(lambda df: df.iloc[:10])
+        check(lambda df: df.iloc[0:10])
 
         # 2nd partition
-        check(lambda df: df.iloc[  34:  68])
-        check(lambda df: df.iloc[  35:  68])
-        check(lambda df: df.iloc[  34:  67])
-        check(lambda df: df.iloc[  35:  67])
-        check(lambda df: df.iloc[  40:  50])
+        check(lambda df: df.iloc[34:68])
+        check(lambda df: df.iloc[35:68])
+        check(lambda df: df.iloc[34:67])
+        check(lambda df: df.iloc[35:67])
+        check(lambda df: df.iloc[40:50])
 
         # 3rd/last partition:
-        check(lambda df: df.iloc[  68: 100])
-        check(lambda df: df.iloc[  69: 100])
-        check(lambda df: df.iloc[  68:    ])
-        check(lambda df: df.iloc[  69:    ])
-        check(lambda df: df.iloc[  68:  99])
-        check(lambda df: df.iloc[  69:  99])
-        check(lambda df: df.iloc[  68:  -1])
-        check(lambda df: df.iloc[  69:  -1])
+        check(lambda df: df.iloc[68:100])
+        check(lambda df: df.iloc[69:100])
+        check(lambda df: df.iloc[68:])
+        check(lambda df: df.iloc[69:])
+        check(lambda df: df.iloc[68:99])
+        check(lambda df: df.iloc[69:99])
+        check(lambda df: df.iloc[68:-1])
+        check(lambda df: df.iloc[69:-1])
 
         # empty slices
-        check(lambda df: df.iloc[   0:   0])
-        check(lambda df: df.iloc[   1:   1])
-        check(lambda df: df.iloc[  10:  10])
-        check(lambda df: df.iloc[  33:  33])
-        check(lambda df: df.iloc[  34:  34])
-        check(lambda df: df.iloc[  35:  35])
-        check(lambda df: df.iloc[  99:  99])
-        check(lambda df: df.iloc[ 100: 100])
-        check(lambda df: df.iloc[  -1:  -1])
+        check(lambda df: df.iloc[0:0])
+        check(lambda df: df.iloc[1:1])
+        check(lambda df: df.iloc[10:10])
+        check(lambda df: df.iloc[33:33])
+        check(lambda df: df.iloc[34:34])
+        check(lambda df: df.iloc[35:35])
+        check(lambda df: df.iloc[99:99])
+        check(lambda df: df.iloc[100:100])
+        check(lambda df: df.iloc[-1:-1])
         check(lambda df: df.iloc[-100:-100])
-        check(lambda df: df.iloc[ 101: 101])
-        check(lambda df: df.iloc[ 200: 200])
+        check(lambda df: df.iloc[101:101])
+        check(lambda df: df.iloc[200:200])
         check(lambda df: df.iloc[-101:-101])
         check(lambda df: df.iloc[-200:-200])
 
         # across partitions:
-        check(lambda df: df.iloc[  10:  90])
-        check(lambda df: df.iloc[  10: -10])
-        check(lambda df: df.iloc[ -90: -10])
-        check(lambda df: df.iloc[   1:  -1])
-        check(lambda df: df.iloc[ -99:  99])
-        check(lambda df: df.iloc[    :  50])
-        check(lambda df: df.iloc[   1:  50])
-        check(lambda df: df.iloc[  33:  50])
-        check(lambda df: df.iloc[    :  68])
-        check(lambda df: df.iloc[   1:  68])
-        check(lambda df: df.iloc[  33:  68])
-        check(lambda df: df.iloc[    :  69])
-        check(lambda df: df.iloc[   1:  69])
-        check(lambda df: df.iloc[  33:  69])
-        check(lambda df: df.iloc[  34:  69])
-        check(lambda df: df.iloc[  35:  69])
+        check(lambda df: df.iloc[10:90])
+        check(lambda df: df.iloc[10:-10])
+        check(lambda df: df.iloc[-90:-10])
+        check(lambda df: df.iloc[1:-1])
+        check(lambda df: df.iloc[-99:99])
+        check(lambda df: df.iloc[:50])
+        check(lambda df: df.iloc[1:50])
+        check(lambda df: df.iloc[33:50])
+        check(lambda df: df.iloc[:68])
+        check(lambda df: df.iloc[1:68])
+        check(lambda df: df.iloc[33:68])
+        check(lambda df: df.iloc[:69])
+        check(lambda df: df.iloc[1:69])
+        check(lambda df: df.iloc[33:69])
+        check(lambda df: df.iloc[34:69])
+        check(lambda df: df.iloc[35:69])
 
-        check(lambda df: df.iloc[    : 200])
-        check(lambda df: df.iloc[   0: 200])
-        check(lambda df: df.iloc[  10: 200])
-        check(lambda df: df.iloc[  50: 200])
-        check(lambda df: df.iloc[  90: 200])
+        check(lambda df: df.iloc[:200])
+        check(lambda df: df.iloc[0:200])
+        check(lambda df: df.iloc[10:200])
+        check(lambda df: df.iloc[50:200])
+        check(lambda df: df.iloc[90:200])
 
         # Pandas squeezes these to Series, but Dask generally doesn't have enough info to make that
         # decision at graph-construction time. In principle, DDF.iloc does know whether the row-indexer
@@ -989,7 +1000,7 @@ def test_where_mask():
         (ddf5, pdf6, pdf5, pdf6),
     ]
 
-    for ddf, ddcond, pdf, pdcond in cases:
+    for idx, (ddf, ddcond, pdf, pdcond) in enumerate(cases):
         assert isinstance(ddf, dd.DataFrame)
         assert isinstance(ddcond, (dd.DataFrame, pd.DataFrame))
         assert isinstance(pdf, pd.DataFrame)
@@ -1155,7 +1166,7 @@ def test_metadata_inference_single_partition_aligned_args():
         assert len(df) > 0
         return df
 
-    res = dd.map_partitions(check, ddf, ddf.x)
+    res = dd.map_partitions(check, ddf, ddf.x, preserve_partition_sizes=True)
     assert_eq(res, ddf)
 
 
@@ -1551,15 +1562,20 @@ def test_assign():
         index=pd.Index(list("abcdefgh")),
     )
     ddf = dd.from_pandas(df, npartitions=3)
+    assert ddf.known_divisions
     ddf_unknown = dd.from_pandas(df, npartitions=3, sort=False)
     assert not ddf_unknown.known_divisions
 
+    h = np.array(range(len(df)))
+    i = da.from_array(h)
     res = ddf.assign(
         c=1,
         d="string",
         e=ddf.a.sum(),
         f=ddf.a + ddf.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i,
         dt=pd.Timestamp(2018, 2, 13),
     )
     res_unknown = ddf_unknown.assign(
@@ -1568,6 +1584,8 @@ def test_assign():
         e=ddf_unknown.a.sum(),
         f=ddf_unknown.a + ddf_unknown.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i,
         dt=pd.Timestamp(2018, 2, 13),
     )
     sol = df.assign(
@@ -1576,6 +1594,8 @@ def test_assign():
         e=df.a.sum(),
         f=df.a + df.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i.compute(),
         dt=pd.Timestamp(2018, 2, 13),
     )
     assert_eq(res, sol)
@@ -1931,7 +1951,7 @@ def test_repartition():
             [compute_as_if_collection(dd.DataFrame, d.dask, k) for k in keys]
         )
         assert_eq(orig, sp)
-        assert_eq(orig, d)
+        assert_eq(orig, d, check_partition_sizes=False)
 
     df = pd.DataFrame(
         {"x": [1, 2, 3, 4, 5, 6], "y": list("abdabd")}, index=[10, 20, 30, 40, 50, 60]
@@ -1940,7 +1960,7 @@ def test_repartition():
 
     b = a.repartition(divisions=[10, 20, 50, 60])
     assert b.divisions == (10, 20, 50, 60)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
     assert_eq(compute_as_if_collection(dd.DataFrame, b.dask, (b._name, 0)), df.iloc[:1])
 
     for div in [
@@ -2086,7 +2106,7 @@ def test_repartition_npartitions(use_index, n, k, dtype, transform):
         check_partition_sizes(b, None)
     else:
         check_partition_sizes(b)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
     assert b.npartitions == k
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -2104,7 +2124,7 @@ def test_repartition_partition_size(use_index, n, partition_size, transform):
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
     b = a.repartition(partition_size=partition_size)
-    assert_eq(a, b, check_divisions=False)
+    assert_eq(a, b, check_divisions=False, check_partition_sizes=False)
     assert np.alltrue(b.map_partitions(total_mem_usage, deep=True).compute() <= 1024)
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -2141,7 +2161,7 @@ def test_repartition_npartitions_numeric_edge_case():
     a = dd.from_pandas(df, npartitions=15)
     assert a.npartitions == 15
     b = a.repartition(npartitions=11)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
 
 
 def test_repartition_object_index():
@@ -2767,13 +2787,13 @@ def test_to_timestamp():
     assert_eq(
         ddf.to_timestamp(freq="M", how="s").compute(),
         df.to_timestamp(freq="M", how="s"),
-        **CHECK_FREQ
+        **CHECK_FREQ,
     )
     assert_eq(ddf.x.to_timestamp(), df.x.to_timestamp())
     assert_eq(
         ddf.x.to_timestamp(freq="M", how="s").compute(),
         df.x.to_timestamp(freq="M", how="s"),
-        **CHECK_FREQ
+        **CHECK_FREQ,
     )
 
 
@@ -2793,7 +2813,7 @@ def test_to_dask_array_raises(as_frame):
     if as_frame:
         a = a.to_frame()
 
-    with pytest.raises(ValueError, match="4 != 2"):
+    with pytest.raises(ValueError, match="6 != 10"):
         a.to_dask_array((1, 2, 3, 4))
 
     with pytest.raises(ValueError, match="Unexpected value"):
@@ -2813,9 +2833,9 @@ def test_to_dask_array_unknown(as_frame):
     chunks = result.chunks
 
     if as_frame:
-        assert chunks == ((2,3),(1,))
+        assert chunks == ((2, 3), (1,))
     else:
-        assert chunks == ((2,3),)
+        assert chunks == ((2, 3),)
 
 
 @pytest.mark.parametrize(
@@ -3533,6 +3553,11 @@ def test_array_assignment():
 
     arr = np.array(np.random.normal(size=50))
     darr = da.from_array(arr, chunks=10)
+    ddf["z"] = darr
+    np.testing.assert_array_equal(ddf.z.values.compute(), darr.compute())
+
+    # If we don't know the partition_sizes, assigning an Array w/ a different number of partitions raises
+    ddf.partition_sizes = None
     msg = "Number of partitions do not match"
     with pytest.raises(ValueError, match=msg):
         ddf["z"] = darr

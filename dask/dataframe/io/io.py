@@ -11,7 +11,7 @@ from ...base import tokenize
 from ... import array as da
 from ...delayed import delayed
 
-from ..core import DataFrame, Series, Index, new_dd_object, has_parallel_type
+from ..core import DataFrame, Series, Index, new_dd_object, has_parallel_type, HighLevelGraph
 from ..shuffle import set_partition
 from ..utils import insert_meta_param_description, check_meta, make_meta, is_series_like
 
@@ -208,7 +208,9 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
     name = name or ("from_pandas-" + tokenize(data, chunksize))
 
     if not nrows:
-        return new_dd_object({(name, 0): data}, name, data, divisions=[None, None], partition_sizes=[0])
+        return new_dd_object(
+            {(name, 0): data}, name, data, divisions=[None, None], partition_sizes=[0]
+        )
 
     if sort and not data.index.is_monotonic_increasing:
         data = data.sort_index(ascending=True)
@@ -221,7 +223,7 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
         divisions = [None] * len(locations)
 
     partition_bounds = list(zip(locations[:-1], locations[1:]))
-    partition_sizes = [ stop-start for start, stop in partition_bounds ]
+    partition_sizes = tuple(stop - start for start, stop in partition_bounds)
     dsk = {
         (name, i): data.iloc[start:stop]
         for i, (start, stop) in enumerate(partition_bounds)
@@ -458,12 +460,14 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             )
             raise ValueError(msg)
         divisions = index.divisions
+        partition_sizes = index.partition_sizes
         to_merge.append(ensure_dict(index.dask))
         index = index.__dask_keys__()
 
     elif np.isnan(sum(x.shape)):
         divisions = [None] * (len(x.chunks[0]) + 1)
         index = [None] * len(x.chunks[0])
+        partition_sizes = None
     else:
         divisions = [0]
         for c in x.chunks[0]:
@@ -472,6 +476,7 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             (np.arange, a, b, 1, "i8") for a, b in zip(divisions[:-1], divisions[1:])
         ]
         divisions[-1] -= 1
+        partition_sizes = tuple(x.chunks[0])
 
     dsk = {}
     for i, (chunk, ind) in enumerate(zip(x.__dask_keys__(), index)):
@@ -483,7 +488,53 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             dsk[name, i] = (type(meta), chunk, ind, meta.columns)
 
     to_merge.extend([ensure_dict(x.dask), dsk])
-    return new_dd_object(merge(*to_merge), name, meta, divisions)
+    return new_dd_object(merge(*to_merge), name, meta, divisions, partition_sizes=partition_sizes)
+
+
+# TODO: figure out why from_dask_array (which ostensibly does the same thing) populates task dependencies differently
+# resulting in _check_dask → graph.validate() failing in tests
+def series_from_dask_array(arr, index):
+    if len(arr.shape) > 1:
+        raise ValueError("Array assignment only supports 1-D arrays")
+
+    partition_sizes = index.partition_sizes
+    if partition_sizes:
+        if len(index) != arr.size:
+            raise ValueError("Sizes don't match: %d != %d" % (len(self), v.size))
+
+        aligned = arr.rechunk(chunks=(partition_sizes,))
+
+        name = "array2series-%s" % tokenize(index, aligned)
+        def make_series(index, arr):
+            if not arr.size:
+                if not index.empty:
+                    raise ValueError('Empty array chunks but non-empty index chunk (%d): [%s,%s]' % (len(index), str(index[0]), str(index[-1])))
+            return pd.Series(arr, index=index)
+        dsk = {
+            (name, idx): (
+                make_series,
+                (index._name, idx),
+                (aligned._name, idx),
+            )
+            for idx in range(index.npartitions)
+        }
+        meta = pd.Series([], dtype=arr.dtype)
+        graph = HighLevelGraph.from_collections(name, dsk, dependencies=[index, aligned])
+        return new_dd_object(
+            graph,
+            name,
+            meta=meta,
+            divisions=index.divisions,
+            partition_sizes=partition_sizes,
+        )
+    elif arr.npartitions != index.npartitions:
+        raise ValueError(
+            "Number of partitions do not match ({0} != {1})".format(
+                arr.npartitions, index.npartitions
+            )
+        )
+    else:
+        return from_dask_array(arr, index=index)
 
 
 def _link(token, result):
