@@ -14,16 +14,26 @@ def compute_layer_dependencies(layers):
     """Returns the dependencies between layers"""
 
     def _find_layer_containing_key(key):
-        for k, v in layers.items():
-            if key in v:
-                return k
-        raise RuntimeError(f"{repr(key)} not found")
+        _layers = [ k for k, v in layers.items() if key in v ]
+        if len(_layers) == 1:
+            return _layers[0]
+        elif len(_layers) > 1:
+            raise RuntimeError("Found task key %s in multiple layers: %s" % (key, ','.join(_layers)))
+        else:
+            raise RuntimeError(f"{repr(key)} not found")
+
 
     all_keys = set(key for layer in layers.values() for key in layer)
-    ret = {k: set() for k in layers.keys()}
+    ret = {}
     for k, v in layers.items():
-        for key in keys_in_tasks(all_keys.difference(v.keys()), v.values()):
-            ret[k].add(_find_layer_containing_key(key))
+        non_layer_keys = all_keys.difference(v.keys())
+        layer_tasks = v.values()
+        task_keys = keys_in_tasks(non_layer_keys, layer_tasks)
+        _layers = set(
+            _find_layer_containing_key(key)
+            for key in task_keys
+        )
+        ret[k] = _layers
     return ret
 
 
@@ -263,7 +273,7 @@ class HighLevelGraph(Mapping):
         layer : Mapping
             The graph layer itself
         dependencies : List of Dask collections
-            A lit of other dask collections (like arrays or dataframes) that
+            A list of other dask collections (like arrays or dataframes) that
             have graphs themselves
 
         Examples
