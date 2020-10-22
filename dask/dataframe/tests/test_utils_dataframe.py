@@ -17,6 +17,7 @@ from dask.dataframe.utils import (
     is_series_like,
     is_index_like,
     PANDAS_GT_0240,
+    PANDAS_GT_100,
 )
 
 import pytest
@@ -129,11 +130,12 @@ def test_meta_nonempty():
             "E": np.int32(1),
             "F": pd.Timestamp("2016-01-01"),
             "G": pd.date_range("2016-01-01", periods=3, tz="America/New_York"),
-            "H": pd.Timedelta("1 hours", "ms"),
+            "H": pd.Timedelta("1 hours"),
             "I": np.void(b" "),
             "J": pd.Categorical([UNKNOWN_CATEGORIES] * 3),
+            "K": pd.Categorical([None, None, None]),
         },
-        columns=list("DCBAHGFEIJ"),
+        columns=list("DCBAHGFEIJK"),
     )
     df2 = df1.iloc[0:0]
     df3 = meta_nonempty(df2)
@@ -147,9 +149,10 @@ def test_meta_nonempty():
     assert df3["E"][0].dtype == "i4"
     assert df3["F"][0] == pd.Timestamp("1970-01-01 00:00:00")
     assert df3["G"][0] == pd.Timestamp("1970-01-01 00:00:00", tz="America/New_York")
-    assert df3["H"][0] == pd.Timedelta("1", "ms")
+    assert df3["H"][0] == pd.Timedelta("1")
     assert df3["I"][0] == "foo"
     assert df3["J"][0] == UNKNOWN_CATEGORIES
+    assert len(df3["K"].cat.categories) == 0
 
     s = meta_nonempty(df2["A"])
     assert s.dtype == df2["A"].dtype
@@ -361,9 +364,9 @@ def test_check_meta():
         "+--------+----------+----------+\n"
         "| Column | Found    | Expected |\n"
         "+--------+----------+----------+\n"
-        "| a      | object   | category |\n"
-        "| c      | -        | float64  |\n"
-        "| e      | category | -        |\n"
+        "| 'a'    | object   | category |\n"
+        "| 'c'    | -        | float64  |\n"
+        "| 'e'    | category | -        |\n"
         "+--------+----------+----------+"
     )
     assert str(err.value) == exp
@@ -441,3 +444,12 @@ def test_apply_and_enforce_message():
 
     with pytest.raises(ValueError, match=re.escape("Missing: ['D']")):
         apply_and_enforce(_func=func, _meta=meta)
+
+
+@pytest.mark.skipif(not PANDAS_GT_100, reason="Only pandas>1")
+def test_nonempty_series_sparse():
+    ser = pd.Series(pd.array([0, 1], dtype="Sparse"))
+    with pytest.warns(None) as w:
+        dd.utils._nonempty_series(ser)
+
+    assert len(w) == 0

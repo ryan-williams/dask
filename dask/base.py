@@ -227,7 +227,12 @@ def collections_to_dsk(collections, optimize_graph=True, **kwargs):
                 _opt_list.append(_opt)
             groups = group
 
-        dsk = merge(*map(ensure_dict, _opt_list,))
+        dsk = merge(
+            *map(
+                ensure_dict,
+                _opt_list,
+            )
+        )
     else:
         dsk, _ = _extract_graph_and_keys(collections)
 
@@ -554,7 +559,7 @@ def visualize(*args, **kwargs):
 
 
 def persist(*args, **kwargs):
-    """ Persist multiple Dask collections into memory
+    """Persist multiple Dask collections into memory
 
     This turns lazy Dask collections into Dask collections with the same
     metadata, but now with their results fully computed or actively computing
@@ -661,7 +666,7 @@ def persist(*args, **kwargs):
 
 
 def tokenize(*args, **kwargs):
-    """ Deterministic token
+    """Deterministic token
 
     >>> tokenize([1, 2, '3'])
     '7d6a880cd9ec03506eee6973ff551339'
@@ -697,7 +702,13 @@ def normalize_set(s):
 
 @normalize_token.register((tuple, list))
 def normalize_seq(seq):
-    return type(seq).__name__, list(map(normalize_token, seq))
+    def func(seq):
+        try:
+            return list(map(normalize_token, seq))
+        except RecursionError:
+            return str(uuid.uuid4())
+
+    return type(seq).__name__, func(seq)
 
 
 @normalize_token.register(literal)
@@ -939,7 +950,7 @@ def register_scipy():
 
 
 def _colorize(t):
-    """ Convert (r, g, b) triple to "#RRGGBB" string
+    """Convert (r, g, b) triple to "#RRGGBB" string
 
     For use with ``visualize(color=...)``
 
@@ -999,12 +1010,12 @@ or with a Dask client
 
 
 def get_scheduler(get=None, scheduler=None, collections=None, cls=None):
-    """ Get scheduler function
+    """Get scheduler function
 
     There are various ways to specify the scheduler to use:
 
     1.  Passing in scheduler= parameters
-    2.  Passing these into global confiuration
+    2.  Passing these into global configuration
     3.  Using defaults of a dask collection
 
     This function centralizes the logic to determine the right scheduler to use
@@ -1063,7 +1074,7 @@ def get_scheduler(get=None, scheduler=None, collections=None, cls=None):
 
 
 def wait(x, timeout=None, return_when="ALL_COMPLETED"):
-    """ Wait until computation has finished
+    """Wait until computation has finished
 
     This is a compatibility alias for ``dask.distributed.wait``.
     If it is applied onto Dask collections without Dask Futures or if Dask
