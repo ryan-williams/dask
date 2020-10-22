@@ -92,9 +92,10 @@ class _iLocIndexer(_IndexerBase):
                 )
         elif not (isinstance(iindexer, slice) and iindexer == slice(None)):
             if not partition_sizes:
+                cls = obj.__class__.__name__
                 raise NotImplementedError(
                     "%s.iloc only supported for %s with known partition_sizes"
-                    % obj.__class__.__name__
+                    % (cls, cls)
                 )
 
             _len = obj._len
