@@ -1,0 +1,41 @@
+name: Docker
+on: push
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.head_ref }}
+          submodules: true
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.7.9'
+      - name: Fetch current tag
+        if: "startsWith(github.ref, 'refs/tags/')"
+        run: |
+          git fetch --depth=1 origin +"$GITHUB_REF:$GITHUB_REF"
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Parse branch/tag name
+        id: vars
+        run: echo ::set-output name=name::${GITHUB_REF#refs/*/}
+      - name: "docker build"
+        run: |
+          docker build --build-arg REF=${{ steps.vars.outputs.name }} -t celsiustx/dask .
+      - name: "docker tag"
+        run: |
+          docker tag celsiustx/dask "celsiustx/dask:${{ steps.vars.outputs.name }}"
+          docker tag celsiustx/dask "celsiustx/dask:$GITHUB_SHA"
+      - name: "docker login"
+        run: |
+          docker login -u ${{ secrets.DOCKERHUB_USER }} -p ${{ secrets.DOCKERHUB }}
+      - name: "docker push"
+        run: |
+          docker push celsiustx/dask
+          docker push "celsiustx/dask:${{ steps.vars.outputs.name }}"
+          docker push "celsiustx/dask:$GITHUB_SHA"
