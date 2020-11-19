@@ -19,6 +19,9 @@ dsk = {
 meta = make_meta({"a": "i8", "b": "i8"}, index=pd.Index([], "i8"))
 d = dd.DataFrame(dsk, "x", meta, [0, 5, 9, 9])
 full = d.compute()
+CHECK_FREQ = {}
+if dd._compat.PANDAS_GT_110:
+    CHECK_FREQ["check_freq"] = False
 
 
 def test_loc():
@@ -303,6 +306,26 @@ def test_getitem_slice():
     assert_eq(ddf["f":], df["f":])
 
 
+def test_series_getitem_slice():
+    df = pd.DataFrame(
+        {
+            "A": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+            "B": [9, 8, 7, 6, 5, 4, 3, 2, 1],
+            "C": [True, False, True] * 3,
+        },
+        index=list("abcdefghi"),
+    )
+    ddf = dd.from_pandas(df, 3)
+    A = ddf.A
+    C = ddf.C
+    assert_eq(A[C], df.A[df.C])
+    # Slicing doesn't require equal divisions; alignment flow sorts it out
+    C2 = C.repartition(divisions=("a", "e", "i"))
+    assert_eq(ddf.A[C2], df.A[df.C])
+    C4 = C.repartition(divisions=("a", "c", "g", "i"))
+    assert_eq(ddf.A[C4], df.A[df.C])
+
+
 def test_getitem_integer_slice():
     df = pd.DataFrame({"A": range(6)})
     ddf = dd.from_pandas(df, 2)
@@ -368,24 +391,35 @@ def test_loc_timestamp_str():
     assert_eq(df.loc["2011-01-02"], ddf.loc["2011-01-02"])
     assert_eq(df.loc["2011-01-02":"2011-01-10"], ddf.loc["2011-01-02":"2011-01-10"])
     # same reso, dask result is always DataFrame
-    assert_eq(df.loc["2011-01-02 10:00"].to_frame().T, ddf.loc["2011-01-02 10:00"])
+    assert_eq(
+        df.loc["2011-01-02 10:00"].to_frame().T,
+        ddf.loc["2011-01-02 10:00"],
+        **CHECK_FREQ
+    )
 
     # series
-    assert_eq(df.A.loc["2011-01-02"], ddf.A.loc["2011-01-02"])
-    assert_eq(df.A.loc["2011-01-02":"2011-01-10"], ddf.A.loc["2011-01-02":"2011-01-10"])
+    assert_eq(df.A.loc["2011-01-02"], ddf.A.loc["2011-01-02"], **CHECK_FREQ)
+    assert_eq(
+        df.A.loc["2011-01-02":"2011-01-10"],
+        ddf.A.loc["2011-01-02":"2011-01-10"],
+        **CHECK_FREQ
+    )
 
     # slice with timestamp (dask result must be DataFrame)
     assert_eq(
         df.loc[pd.Timestamp("2011-01-02")].to_frame().T,
         ddf.loc[pd.Timestamp("2011-01-02")],
+        **CHECK_FREQ
     )
     assert_eq(
         df.loc[pd.Timestamp("2011-01-02") : pd.Timestamp("2011-01-10")],
         ddf.loc[pd.Timestamp("2011-01-02") : pd.Timestamp("2011-01-10")],
+        **CHECK_FREQ
     )
     assert_eq(
         df.loc[pd.Timestamp("2011-01-02 10:00")].to_frame().T,
         ddf.loc[pd.Timestamp("2011-01-02 10:00")],
+        **CHECK_FREQ
     )
 
     df = pd.DataFrame(

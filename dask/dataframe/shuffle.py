@@ -84,7 +84,7 @@ def set_index(
         divisions, sizes, mins, maxes = base.compute(
             divisions, sizes, mins, maxes, optimize_graph=False
         )
-        divisions = divisions.tolist()
+        divisions = methods.tolist(divisions)
 
         empty_dataframe_detected = pd.isnull(divisions).all()
         if repartition or empty_dataframe_detected:
@@ -115,7 +115,9 @@ def set_index(
             and all(mx < mn for mx, mn in zip(maxes[:-1], mins[1:]))
         ):
             divisions = mins + [maxes[-1]]
-            result = set_sorted_index(df, index, drop=drop, divisions=divisions)  # TODO: partition_sizes
+            result = set_sorted_index(
+                df, index, drop=drop, divisions=divisions
+            )  # TODO: partition_sizes
             return result.map_partitions(M.sort_index)
 
     return set_partition(
@@ -124,7 +126,7 @@ def set_index(
 
 
 def remove_nans(divisions):
-    """ Remove nans from divisions
+    """Remove nans from divisions
 
     These sometime pop up when we call min/max on an empty partition
 
@@ -155,7 +157,7 @@ def remove_nans(divisions):
 def set_partition(
     df, index, divisions, max_branch=32, drop=True, shuffle=None, compute=None
 ):
-    """ Group DataFrame by index
+    """Group DataFrame by index
 
     Sets a new index and partitions data along that index according to
     divisions.  Divisions are often found by computing approximate quantiles.
@@ -238,7 +240,7 @@ def set_partition(
             column_dtype=df.columns.dtype,
         )
 
-    df4.divisions = divisions.tolist()
+    df4.divisions = methods.tolist(divisions)
 
     return df4.map_partitions(M.sort_index)
 
@@ -252,7 +254,7 @@ def shuffle(
     ignore_index=False,
     compute=None,
 ):
-    """ Group DataFrame by index
+    """Group DataFrame by index
 
     Hash grouping of elements. After this operation all elements that have
     the same index will be in the same partition. Note that this requires
@@ -319,7 +321,9 @@ def rearrange_by_divisions(df, column, divisions, max_branch=None, shuffle=None)
     meta = df._meta._constructor_sliced([0])
     # Assign target output partitions to every row
     partitions = df[column].map_partitions(
-        set_partitions_pre, divisions=divisions, meta=meta,  # TODO: partition_sizes
+        set_partitions_pre,
+        divisions=divisions,
+        meta=meta,  # TODO: partition_sizes
     )
     df2 = df.assign(_partitions=partitions)
 
@@ -404,7 +408,7 @@ class maybe_buffered_partd(object):
 
 
 def rearrange_by_column_disk(df, column, npartitions=None, compute=False):
-    """ Shuffle using local disk
+    """Shuffle using local disk
 
     See Also
     --------
@@ -472,8 +476,7 @@ def _noop(x, cleanup_token):
 
 
 def _simple_rearrange_by_column_tasks(df, column, npartitions, ignore_index=False):
-    """ A simplified (single-stage) version of ``rearrange_by_column_tasks``.
-    """
+    """A simplified (single-stage) version of ``rearrange_by_column_tasks``."""
 
     token = tokenize(df, column)
     simple_shuffle_group_token = "simple-shuffle-group-" + token
@@ -534,7 +537,7 @@ def _simple_rearrange_by_column_tasks(df, column, npartitions, ignore_index=Fals
 def rearrange_by_column_tasks(
     df, column, max_branch=32, npartitions=None, ignore_index=False
 ):
-    """ Order divisions of DataFrame so that all values within column(s) align
+    """Order divisions of DataFrame so that all values within column(s) align
 
     This enacts a task-based shuffle.  It contains most of the tricky logic
     around the complex network of tasks.  Typically before this function is
@@ -816,7 +819,7 @@ def shuffle_group_get(g_head, i):
 
 
 def shuffle_group(df, cols, stage, k, npartitions, ignore_index, nfinal):
-    """ Splits dataframe into groups
+    """Splits dataframe into groups
 
     The group is determined by their final partition, and which stage we are in
     in the shuffle
@@ -944,8 +947,7 @@ def compute_and_set_divisions(df, **kwargs):
 
     df.divisions = tuple(mins) + (list(maxes)[-1],)
     df.partition_sizes = tuple(lens)
-    df._len = sum(df.partition_sizes)
-    overlap = [i for i in range(1, len(mins)) if mins[i] >= maxes[i - 1]]  # TODO: is this >= backwards…?
+    overlap = [i for i in range(1, len(mins)) if mins[i] <= maxes[i - 1]]
     return fix_overlap(df, overlap) if overlap else df
 
 

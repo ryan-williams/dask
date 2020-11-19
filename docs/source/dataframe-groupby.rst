@@ -129,12 +129,12 @@ Aggregate
 =========
 
 Dask supports Pandas' ``aggregate`` syntax to run multiple reductions on the
-same groups.  Common reductions such as ``max``, ``sum``, and ``mean`` are 
+same groups.  Common reductions such as ``max``, ``sum``, ``list`` and ``mean`` are 
 directly supported:
 
 .. code-block:: python
 
-    >>> df.groupby(columns).aggregate(['sum', 'mean', 'max', 'min'])
+    >>> df.groupby(columns).aggregate(['sum', 'mean', 'max', 'min', list])
 
 Dask also supports user defined reductions.  To ensure proper performance, the
 reduction has to be formulated in terms of three independent steps. The
@@ -179,7 +179,7 @@ for a DataFrame.
    >>> df = pd.DataFrame({
    ...   'a': ['a', 'b', 'a', 'a', 'b'],
    ...   'b': [0, 1, 0, 2, 5],
-   >>> })
+   ... })
    >>> ddf = dd.from_pandas(df, 2)
 
 We define the building blocks to find the maximum and minimum of each chunk, and then
@@ -208,15 +208,17 @@ Finally, we create and use the aggregation
    a  2
    b  4
 
-Another example of a custom aggregation is the Dask DataFrame version of 
-Pandas' ``groupby('g').agg(list)``:
+To apply :py:class:`dask.dataframe.groupby.SeriesGroupBy.nunique` to more than one
+column you can use:
 
 .. code-block:: python
 
-   >>> import itertools as it
-   >>> collect_list = dd.Aggregation(
-   ...     name="collect_list",
-   ...     chunk=lambda s: s.apply(list),
-   ...     agg=lambda s0: s0.apply(lambda chunks: list(it.chain.from_iterable(chunks))),
-   ... )
-   >>> df.groupby('g').agg(collect_list)
+    >>> df['c'] = [1, 2, 1, 1, 2]
+    >>> ddf = dd.from_pandas(df, 2)
+    >>> nunique = dd.Aggregation(
+    ...     name="nunique",
+    ...     chunk=lambda s: s.apply(lambda x: list(set(x))),
+    ...     agg=lambda s0: s0.obj.groupby(level=list(range(s0.obj.index.nlevels))).sum(),
+    ...     finalize=lambda s1: s1.apply(lambda final: len(set(final))),
+    ... )
+    >>> ddf.groupby('a').agg({'b':nunique, 'c':nunique})

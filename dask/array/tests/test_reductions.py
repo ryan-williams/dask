@@ -515,7 +515,7 @@ def test_reduction_names():
 
 
 def test_general_reduction_names():
-    dtype = np.int
+    dtype = int
     a = da.reduction(
         da.ones(10, dtype, chunks=2), np.sum, np.sum, dtype=dtype, name="foo"
     )
@@ -689,3 +689,10 @@ def test_median(axis, keepdims, func):
         getattr(da, func)(d, axis=axis, keepdims=keepdims),
         getattr(np, func)(x, axis=axis, keepdims=keepdims),
     )
+
+
+@pytest.mark.parametrize("method", ["sum", "mean", "prod"])
+def test_object_reduction(method):
+    arr = da.ones(1).astype(object)
+    result = getattr(arr, method)().compute()
+    assert result == 1

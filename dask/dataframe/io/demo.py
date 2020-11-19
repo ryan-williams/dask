@@ -90,7 +90,7 @@ def make_timeseries(
     seed=None,
     **kwargs
 ):
-    """ Create timeseries dataframe with random data
+    """Create timeseries dataframe with random data
 
     Parameters
     ----------
@@ -126,6 +126,9 @@ def make_timeseries(
     2000-01-01 08:00:00  1031     Kevin  0.466002
     """
     divisions = list(pd.date_range(start=start, end=end, freq=partition_freq))
+    partition_sizes = [
+        (end - start) // freq for start, end in zip(divisions, divisions[1:])
+    ]
     state_data = random_state_data(len(divisions) - 1, seed)
     name = "make-timeseries-" + tokenize(
         start, end, dtypes, freq, partition_freq, state_data
@@ -143,7 +146,7 @@ def make_timeseries(
         for i in range(len(divisions) - 1)
     }
     head = make_timeseries_part("2000", "2000", dtypes, "1H", state_data[0], kwargs)
-    return DataFrame(dsk, name, head, divisions)
+    return DataFrame(dsk, name, head, divisions, partition_sizes)
 
 
 def generate_day(
@@ -206,7 +209,7 @@ def daily_stock(
     data_source="yahoo",
     random_state=None,
 ):
-    """ Create artificial stock data
+    """Create artificial stock data
 
     This data matches daily open/high/low/close values from Yahoo! Finance, but
     interpolates values within each day with random values.  This makes the

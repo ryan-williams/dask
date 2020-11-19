@@ -41,12 +41,15 @@ def to_numeric(arg, errors="raise", meta=None):
             token=arg._name + "-to_numeric",
             meta=meta,
             enforce_metadata=False,
-            preserve_partitions=True,
+            preserve_partition_sizes=True,
             errors=errors,
         )
     if is_array:
         return arg.map_blocks(
-            pd.to_numeric, name=arg._name + "-to_numeric", meta=meta, errors=errors,
+            pd.to_numeric,
+            name=arg._name + "-to_numeric",
+            meta=meta,
+            errors=errors,
         )
     if is_scalar:
         return delayed(pd.to_numeric, pure=True)(arg, errors=errors)

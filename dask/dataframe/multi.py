@@ -91,7 +91,7 @@ from ..utils import M
 
 
 def align_partitions(*dfs):
-    """ Mutually partition and align DataFrame blocks
+    """Mutually partition and align DataFrame blocks
 
     This serves as precursor to multi-dataframe operations like join, concat,
     or merge.
@@ -150,11 +150,13 @@ def align_partitions(*dfs):
 
 
 def maybe_infer_partition_sizes(divisions, prev):
-    if not prev.partition_sizes or not prev.known_divisions:
+    if prev is None or not prev.partition_sizes or not prev.known_divisions:
         return None
     partition_bounds = [0] + np.cumsum(prev.partition_sizes).tolist()[:-1]
     _len = prev._len
-    division_idx_map = { division: idx for idx, division in zip(partition_bounds, prev.divisions[:-1]) }
+    division_idx_map = {
+        division: idx for idx, division in zip(partition_bounds, prev.divisions[:-1])
+    }
     m = min(prev.divisions)
     M = max(prev.divisions)
 
@@ -164,12 +166,14 @@ def maybe_infer_partition_sizes(divisions, prev):
             idxs.append(division_idx_map[division])
         elif division < m:
             idxs.append(0)
-        elif division > M or division == M: #and idx + 1 == len(divisions):
+        elif (
+            division > M or division == M and idx + 1 == len(divisions)
+        ):  # final division is inclusive, so only admissible when it is both sides' final division
             idxs.append(_len)
         else:
             return None
     idxs.append(_len)
-    sizes = [ end - start for start, end in zip(idxs[:-1], idxs[1:]) ]
+    sizes = [end - start for start, end in zip(idxs[:-1], idxs[1:])]
     return sizes
 
 
@@ -192,7 +196,7 @@ def _maybe_align_partitions(args):
 
 
 def require(divisions, parts, required=None):
-    """ Clear out divisions where required components are not present
+    """Clear out divisions where required components are not present
 
     In left, right, or inner joins we exclude portions of the dataset if one
     side or the other is not present.  We can achieve this at the partition
@@ -300,7 +304,7 @@ def hash_join(
     shuffle=None,
     indicator=False,
 ):
-    """ Join two DataFrames on particular columns with hash join
+    """Join two DataFrames on particular columns with hash join
 
     This shuffles both datasets on the joined column and then performs an
     embarrassingly parallel join partition-by-partition
@@ -399,8 +403,7 @@ def single_partition_join(left, right, **kwargs):
 
 
 def warn_dtype_mismatch(left, right, left_on, right_on):
-    """ Checks for merge column dtype mismatches and throws a warning (#4574)
-    """
+    """Checks for merge column dtype mismatches and throws a warning (#4574)"""
 
     if not isinstance(left_on, list):
         left_on = [left_on]
@@ -615,7 +618,7 @@ def most_recent_tail_summary(left, right, by=None):
 
 
 def compute_tails(ddf, by=None):
-    """ For each partition, returns the last row of the most recent nonempty
+    """For each partition, returns the last row of the most recent nonempty
     partition.
     """
     empty = ddf._meta.iloc[0:0]
@@ -638,7 +641,7 @@ def most_recent_head_summary(left, right, by=None):
 
 
 def compute_heads(ddf, by=None):
-    """ For each partition, returns the first row of the next nonempty
+    """For each partition, returns the first row of the next nonempty
     partition.
     """
     empty = ddf._meta.iloc[0:0]
@@ -651,7 +654,7 @@ def compute_heads(ddf, by=None):
 
 
 def pair_partitions(L, R):
-    """ Returns which partitions to pair for the merge_asof algorithm and the
+    """Returns which partitions to pair for the merge_asof algorithm and the
     bounds on which to split them up
     """
     result = []
@@ -873,7 +876,9 @@ def merge_asof(
             if divs is not None:
                 result = result.set_index(ixcol, sorted=True, divisions=divs)
             else:
-                result = result.map_partitions(M.set_index, ixcol, preserve_partitions=True)
+                result = result.map_partitions(
+                    M.set_index, ixcol, preserve_partition_sizes=True
+                )
             result = result.map_partitions(M.rename_axis, ixname)
 
     return result
@@ -931,13 +936,30 @@ def concat_indexed_dataframes(dfs, axis=0, join="outer", **kwargs):
     for df in dfs2:
         dsk.update(df.dask)
 
-    if \
-        len(set([ tuple(df.divisions) for df in dfs if df.divisions is not None ])) == 1 and \
-        len(set([ tuple(df.partition_sizes) for df in dfs if df.partition_sizes is not None ])) == 1:
-        partition_sizes = dfs[0].partition_sizes
-        assert dfs[0].divisions == dfs2[0].divisions
+    # In general, we don't know what the result's partition_sizes will be, but there are a few cases where we do:
+    all_divisions = list(set([df.divisions for df in dfs]))
+    if len(all_divisions) == 1 and all_divisions[0] is not None:
+        if axis in [1, "1", "columns"]:
+            # When concatenating columns, only infer partition_sizes if they are all equal (in which case we copy
+            # that partition_sizes value)
+            distinct_partition_sizes = list(set([df.partition_sizes for df in dfs]))
+            if len(distinct_partition_sizes) == 1:
+                partition_sizes = distinct_partition_sizes[0]
+            else:
+                partition_sizes = None
+        else:
+            if all([df.partition_sizes is not None for df in dfs]):
+                # If all dataframes have the same divisions and known partition_sizes, the result's partition_sizes
+                # will be the partition-wise sums of each dataframe's respective partition_sizes
+                partition_sizes = tuple(
+                    sum(partitions)
+                    for partitions in zip(*[df.partition_sizes for df in dfs])
+                )
+            else:
+                partition_sizes = None
     else:
         partition_sizes = None
+
     return new_dd_object(dsk, name, meta, divisions, partition_sizes=partition_sizes)
 
 
@@ -1007,7 +1029,7 @@ def concat(
     ignore_unknown_divisions=False,
     **kwargs
 ):
-    """ Concatenate DataFrames along rows.
+    """Concatenate DataFrames along rows.
 
     - When axis=0 (default), concatenate DataFrames row-wise:
 
@@ -1137,8 +1159,10 @@ def concat(
     else:
         if all(df.known_divisions for df in dasks):
             # each DataFrame's division must be greater than previous one
-            xpr = [dfs[i].divisions[-1] < dfs[i + 1].divisions[0] for i in range(len(dfs) - 1)]
-            if all(xpr):
+            if all(
+                dfs[i].divisions[-1] < dfs[i + 1].divisions[0]
+                for i in range(len(dfs) - 1)
+            ):
                 divisions = []
                 for df in dfs[:-1]:
                     # remove last to concatenate with next

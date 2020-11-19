@@ -16,7 +16,7 @@ from ..utils import Dispatch
 
 
 def _categorize_block(df, categories, index):
-    """ Categorize a dataframe with given categories
+    """Categorize a dataframe with given categories
 
     df: DataFrame
     categories: dict mapping column name to iterable of categories
@@ -147,7 +147,9 @@ def categorize(df, columns=None, index=None, split_every=None, **kwargs):
     categories, index = compute_as_if_collection(type(df), dsk, (prefix, 0), **kwargs)
 
     # Categorize each partition
-    return df.map_partitions(_categorize_block, categories, index)  # TODO: partition_sizes
+    return df.map_partitions(
+        _categorize_block, categories, index
+    )  # TODO: partition_sizes
 
 
 class CategoricalAccessor(Accessor):

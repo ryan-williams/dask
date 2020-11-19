@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 import numpy as np
 
+import dask.array as da
 import dask.dataframe as dd
 from dask.dataframe.utils import assert_eq, PANDAS_VERSION
 
@@ -139,6 +140,10 @@ rolling_method_args_check_less_precise = [
 @pytest.mark.parametrize("window", [1, 2, 4, 5])
 @pytest.mark.parametrize("center", [True, False])
 def test_rolling_methods(method, args, window, center, check_less_precise):
+    if dd._compat.PANDAS_GT_110:
+        check_less_precise = {}
+    else:
+        check_less_precise = {"check_less_precise": check_less_precise}
     # DataFrame
     prolling = df.rolling(window, center=center)
     drolling = ddf.rolling(window, center=center)
@@ -150,7 +155,7 @@ def test_rolling_methods(method, args, window, center, check_less_precise):
     assert_eq(
         getattr(prolling, method)(*args, **kwargs),
         getattr(drolling, method)(*args, **kwargs),
-        check_less_precise=check_less_precise,
+        **check_less_precise,
     )
 
     # Series
@@ -159,7 +164,7 @@ def test_rolling_methods(method, args, window, center, check_less_precise):
     assert_eq(
         getattr(prolling, method)(*args, **kwargs),
         getattr(drolling, method)(*args, **kwargs),
-        check_less_precise=check_less_precise,
+        **check_less_precise,
     )
 
 
@@ -264,6 +269,14 @@ def test_time_rolling_constructor():
 )
 @pytest.mark.parametrize("window", ["1S", "2S", "3S", pd.offsets.Second(5)])
 def test_time_rolling_methods(method, args, window, check_less_precise):
+    if dd._compat.PANDAS_GT_110:
+        if check_less_precise:
+            check_less_precise = {"atol": 0.5e-3, "rtol": 0.5e-3}
+        else:
+            check_less_precise = {}
+    else:
+        check_less_precise = {"check_less_precise": check_less_precise}
+
     # DataFrame
     if method == "apply":
         kwargs = {"raw": False}
@@ -274,7 +287,7 @@ def test_time_rolling_methods(method, args, window, check_less_precise):
     assert_eq(
         getattr(prolling, method)(*args, **kwargs),
         getattr(drolling, method)(*args, **kwargs),
-        check_less_precise=check_less_precise,
+        **check_less_precise,
     )
 
     # Series
@@ -283,7 +296,7 @@ def test_time_rolling_methods(method, args, window, check_less_precise):
     assert_eq(
         getattr(prolling, method)(*args, **kwargs),
         getattr(drolling, method)(*args, **kwargs),
-        check_less_precise=check_less_precise,
+        **check_less_precise,
     )
 
 
@@ -378,6 +391,7 @@ def test_rolling_agg_aggregate():
 
 
 @pytest.mark.skipif(not dd._compat.PANDAS_GT_100, reason="needs pandas>=1.0.0")
+@pytest.mark.xfail(da.numpy_compat._numpy_120, reason="sparse-383")
 def test_rolling_numba_engine():
     numba = pytest.importorskip("numba")
     if not dd._compat.PANDAS_GT_104 and LooseVersion(numba.__version__) >= "0.49":
