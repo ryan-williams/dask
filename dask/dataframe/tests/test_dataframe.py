@@ -1,11 +1,14 @@
 import warnings
 from itertools import product
 from operator import add
+import unittest
+from unittest import TestCase
 
 import pytest
 import numpy as np
 import pandas as pd
 from pandas.io.formats import format as pandas_format
+from pandas.testing import assert_frame_equal, assert_series_equal
 
 import dask
 import dask.array as da
@@ -301,98 +304,287 @@ def test_repartition_sizes():
     check_partition_sizes(df3, (10,) * 10)
 
 
-def test_iloc():
+# @pytest.fixture
+# def df():
+#     return pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
+#
+#
+# @pytest.fixture
+# def ddf(df):
+#     ret = dd.from_pandas(df, npartitions=3)
+#     assert ret.partition_sizes == (34, 34, 32)
+#     return ret
+
+# frames = (
+#     (ddf, df, assert_frame_equal),
+#     (ddf.i, df.i, assert_series_equal),
+# )
+#
+# @pytest.fixture(params=frames)
+# def check(request):
+#     dask, pandas, cmp = request.param
+#     return lambda fn: cmp(fn(dask).compute(), fn(pandas))
+#
+
+class Checks:
     df = pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
     ddf = dd.from_pandas(df, npartitions=3)
-    assert ddf.partition_sizes == (34, 34, 32)
-    from pandas.testing import assert_frame_equal, assert_series_equal
 
-    def checks(dask, pandas, cmp):
-        def check(fn):
-            cmp(fn(dask).compute(), fn(pandas))
+    # def __init__(self, dask, pandas, cmp, seed=123):
+    def __init__(self, seed=123):
+        # self.dask = dask
+        # self.pandas = pandas
+        # self.cmp = cmp
+        np.random.seed(seed)
 
-        check(lambda df: df.iloc[:100])
-        check(lambda df: df.iloc[:])
-        check(lambda df: df.iloc[0:100])
+    def check(self, fn, pandas_fn=None):
+        l = fn(self.dask).compute()
+        pandas_fn = pandas_fn or fn
+        r = pandas_fn(self.pandas)
+        self.cmp(l, r)
 
-        check(lambda df: df.iloc[:34])
-        check(lambda df: df.iloc[0:34])
-        check(lambda df: df.iloc[10:34])
+    bools = np.random.choice(a=[False, True], size=(100,), p=[.5,.5])
 
-        check(lambda df: df.iloc[10:24])
+    def check_arr_slice(self, elems, chunks=None):
+        pnds_key = np.array(elems)
+        if chunks:
+            dask_key = da.from_array(elems, chunks)
+        else:
+            dask_key = pnds_key
 
-        check(lambda df: df.iloc[:10])
-        check(lambda df: df.iloc[0:10])
+        self.check(lambda df: df.iloc[dask_key], lambda df: df.iloc[pnds_key])
+
+    def test_ranges(self):
+        idxs = (None, 0, 1, 10, 33, 34, 35, 68, 69, 70, 99, 100)
+        steps = [None] + [sgn*i for i in [1, 2, 5, 30, 70, 99, 100] for sgn in [1,-1]]
+
+        def check(idx, args):
+            print('%d: %s' % (idx, args))
+            self.check(lambda df: df.iloc[range(*args)])
+
+        idx = 0
+        for start in idxs:
+            for end in idxs:
+                if end is None: continue
+                for step in steps:
+                    if step is not None:
+                        if step < 0:
+                            end -= 1
+
+                    if start is None:
+                        args = (end,)
+                    else:
+                        args = (start,end)
+
+                    if step is not None:
+                        args = (*args,step)
+
+                    try:
+                        check(idx, args)
+                        idx += 1
+                    except AssertionError as e:
+                        self.assertTrue(False)
+
+        #     check(1)
+        #     check(0, i)
+        #     check(0, i, 2)
+        #     check(0, i, 9)
+        #     check(0, i, 70)
+        #     check(0, i, 99)
+        #     check(0, i, 100)
+        #     check(i, -1, -1)
+        #
+        # check(0,1)
+        # check(0,10)
+        # check(0,100)
+        #
+        # check(34)
+        # check(0,34)
+        # check(10,34)
+        #
+        # check(10,24)
+        #
+        # check(0,10)
+        #
+        # # 2nd partition
+        # check(34,68)
+        # check(35,68)
+        # check(34,67)
+        # check(35,67)
+        # check(40,50)
+        #
+        # # 3rd/last partition:
+        # check(68,100)
+        # check(69,100)
+        # check(68,99)
+        # check(69,99)
+        # check(68,-1)
+        # check(69,-1)
+        #
+        # # empty slices
+        # check(0,0)
+        # check(1,1)
+        # check(10,10)
+        # check(33,33)
+        # check(34,34)
+        # check(35,35)
+        # check(99,99)
+        # check(100,100)
+        # check(-1,-1)
+        # check(-100,-100)
+        # check(101,101)
+        # check(200,200)
+        # check(-101,-101)
+        # check(-200,-200)
+        #
+        # # across partitions:
+        # check(10,90)
+        # check(10,-10)
+        # check(-90,-10)
+        # check(1,-1)
+        # check(-99,99)
+        # check(50)
+        # check(1,50)
+        # check(33,50)
+        # check(68)
+        # check(1,68)
+        # check(33,68)
+        # check(69)
+        # check(1,69)
+        # check(33,69)
+        # check(34,69)
+        # check(35,69)
+        #
+        # check(200)
+        # check(0,200)
+        # check(10,200)
+        # check(50,200)
+        # check(90,200)
+        #
+        # check(0,100,2])
+        # check(99,-1,-1)
+
+    def test_slices(self):
+        def check(slc):
+            self.check(lambda df: df.iloc[slc])
+
+        check(lambda df: df[:100])
+        check(lambda df: df[:])
+        check(lambda df: df[0:100])
+
+        check(lambda df: df[:34])
+        check(lambda df: df[0:34])
+        check(lambda df: df[10:34])
+
+        check(lambda df: df[10:24])
+
+        check(lambda df: df[:10])
+        check(lambda df: df[0:10])
 
         # 2nd partition
-        check(lambda df: df.iloc[34:68])
-        check(lambda df: df.iloc[35:68])
-        check(lambda df: df.iloc[34:67])
-        check(lambda df: df.iloc[35:67])
-        check(lambda df: df.iloc[40:50])
+        check(lambda df: df[34:68])
+        check(lambda df: df[35:68])
+        check(lambda df: df[34:67])
+        check(lambda df: df[35:67])
+        check(lambda df: df[40:50])
 
         # 3rd/last partition:
-        check(lambda df: df.iloc[68:100])
-        check(lambda df: df.iloc[69:100])
-        check(lambda df: df.iloc[68:])
-        check(lambda df: df.iloc[69:])
-        check(lambda df: df.iloc[68:99])
-        check(lambda df: df.iloc[69:99])
-        check(lambda df: df.iloc[68:-1])
-        check(lambda df: df.iloc[69:-1])
+        check(lambda df: df[68:100])
+        check(lambda df: df[69:100])
+        check(lambda df: df[68:])
+        check(lambda df: df[69:])
+        check(lambda df: df[68:99])
+        check(lambda df: df[69:99])
+        check(lambda df: df[68:-1])
+        check(lambda df: df[69:-1])
 
         # empty slices
-        check(lambda df: df.iloc[0:0])
-        check(lambda df: df.iloc[1:1])
-        check(lambda df: df.iloc[10:10])
-        check(lambda df: df.iloc[33:33])
-        check(lambda df: df.iloc[34:34])
-        check(lambda df: df.iloc[35:35])
-        check(lambda df: df.iloc[99:99])
-        check(lambda df: df.iloc[100:100])
-        check(lambda df: df.iloc[-1:-1])
-        check(lambda df: df.iloc[-100:-100])
-        check(lambda df: df.iloc[101:101])
-        check(lambda df: df.iloc[200:200])
-        check(lambda df: df.iloc[-101:-101])
-        check(lambda df: df.iloc[-200:-200])
+        check(lambda df: df[0:0])
+        check(lambda df: df[1:1])
+        check(lambda df: df[10:10])
+        check(lambda df: df[33:33])
+        check(lambda df: df[34:34])
+        check(lambda df: df[35:35])
+        check(lambda df: df[99:99])
+        check(lambda df: df[100:100])
+        check(lambda df: df[-1:-1])
+        check(lambda df: df[-100:-100])
+        check(lambda df: df[101:101])
+        check(lambda df: df[200:200])
+        check(lambda df: df[-101:-101])
+        check(lambda df: df[-200:-200])
 
         # across partitions:
-        check(lambda df: df.iloc[10:90])
-        check(lambda df: df.iloc[10:-10])
-        check(lambda df: df.iloc[-90:-10])
-        check(lambda df: df.iloc[1:-1])
-        check(lambda df: df.iloc[-99:99])
-        check(lambda df: df.iloc[:50])
-        check(lambda df: df.iloc[1:50])
-        check(lambda df: df.iloc[33:50])
-        check(lambda df: df.iloc[:68])
-        check(lambda df: df.iloc[1:68])
-        check(lambda df: df.iloc[33:68])
-        check(lambda df: df.iloc[:69])
-        check(lambda df: df.iloc[1:69])
-        check(lambda df: df.iloc[33:69])
-        check(lambda df: df.iloc[34:69])
-        check(lambda df: df.iloc[35:69])
+        check(lambda df: df[10:90])
+        check(lambda df: df[10:-10])
+        check(lambda df: df[-90:-10])
+        check(lambda df: df[1:-1])
+        check(lambda df: df[-99:99])
+        check(lambda df: df[:50])
+        check(lambda df: df[1:50])
+        check(lambda df: df[33:50])
+        check(lambda df: df[:68])
+        check(lambda df: df[1:68])
+        check(lambda df: df[33:68])
+        check(lambda df: df[:69])
+        check(lambda df: df[1:69])
+        check(lambda df: df[33:69])
+        check(lambda df: df[34:69])
+        check(lambda df: df[35:69])
 
-        check(lambda df: df.iloc[:200])
-        check(lambda df: df.iloc[0:200])
-        check(lambda df: df.iloc[10:200])
-        check(lambda df: df.iloc[50:200])
-        check(lambda df: df.iloc[90:200])
+        check(lambda df: df[:200])
+        check(lambda df: df[0:200])
+        check(lambda df: df[10:200])
+        check(lambda df: df[50:200])
+        check(lambda df: df[90:200])
 
-        # Pandas squeezes these to Series, but Dask generally doesn't have enough info to make that
-        # decision at graph-construction time. In principle, DDF.iloc does know whether the row-indexer
-        # will return exactly one row, so it could mimic Pandas. That would be a departure from other
-        # parts of Dask, which don't squeeze in situations like this. TODO: it's probably worth adding
-        # the squeeze, for consistency with Pandas.
-        # check(lambda df: df.iloc[0])
-        # check(lambda df: df.iloc[10])
-        # check(lambda df: df.iloc[34])
-        # check(lambda df: df.iloc[-1])
+        check(lambda df: df[::2])
+        check(lambda df: df[99:-1:-1])
 
-    checks(ddf, df, assert_frame_equal)
-    checks(ddf.i, df.i, assert_series_equal)
+    def test_arrays(self):
+        def check_arr_slice(chunks=None):
+            self.check_arr_slice(self.bools, chunks)
+        check_arr_slice()
+        check_arr_slice((34,34,32,))
+        check_arr_slice((100,))
+        check_arr_slice((50,50,))
+        check_arr_slice((10,)*10)
+        check_arr_slice((1,)*100)
+
+    # def test_ranges(self):
+    #     def check(range):
+    #         self.check(lambda df: df.iloc[range])
+    #
+    #     check(range(10))
+
+    def test_ints(self):
+        #assert_frame_equal(self.df.iloc[range(10)], self.df.iloc[:10])
+        self.check(lambda df: df.iloc[range(  1)])
+        self.check(lambda df: df.iloc[range( 10)])
+        self.check(lambda df: df.iloc[range( 99)])
+        self.check(lambda df: df.iloc[range(100)])
+
+        self.check(lambda df: df.iloc[range(99, -1, -1)])
+
+    # Pandas squeezes these to Series, but Dask generally doesn't have enough info to make that
+    # decision at graph-construction time. In principle, DDF.iloc does know whether the row-indexer
+    # will return exactly one row, so it could mimic Pandas. That would be a departure from other
+    # parts of Dask, which don't squeeze in situations like this. TODO: it's probably worth adding
+    # the squeeze, for consistency with Pandas.
+    # check(lambda df: df.iloc[0])
+    # check(lambda df: df.iloc[10])
+    # check(lambda df: df.iloc[34])
+    # check(lambda df: df.iloc[-1])
+
+class DataFrameIloc(TestCase, Checks):
+    dask = Checks.ddf
+    pandas = Checks.df
+    def cmp(self, l, r): assert_frame_equal(l, r)
+
+class SeriesIloc(TestCase, Checks):
+    dask = Checks.ddf.i
+    pandas = Checks.df.i
+    def cmp(self, l, r): assert_series_equal(l, r)
 
 
 def test_column_names():

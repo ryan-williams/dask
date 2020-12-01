@@ -8,7 +8,7 @@ import pandas as pd
 from .core import new_dd_object, Series, Index
 from ..array.core import Array
 from .utils import is_index_like, meta_nonempty
-from . import methods
+from . import from_dask_array, methods, concat
 from ..base import tokenize
 from ..highlevelgraph import HighLevelGraph
 
@@ -44,7 +44,7 @@ class _iLocIndexer(_IndexerBase):
         if isinstance(key, int):
             key = slice(key, key + 1)
 
-        if isinstance(key, (slice, list, np.ndarray, Index, Series)):
+        if isinstance(key, (slice, range, list, np.ndarray, Index, Series, Array)):
             key = tuple([key])
 
         if not isinstance(key, tuple):
@@ -82,7 +82,7 @@ class _iLocIndexer(_IndexerBase):
             #     )
             # else:
             if iindexer.dtype == np.dtype(int):
-                raise Exception("not implemented")
+                raise NotImplementedError("TODO: slicing _Frame with Series of ints")
 
             elif iindexer.dtype == np.dtype(bool):
                 return obj.loc[iindexer, cindexer]
@@ -90,239 +90,12 @@ class _iLocIndexer(_IndexerBase):
                 raise Exception(
                     f"Expected a series to be of int or bool, not {iindexer.dtype}!"
                 )
-        elif not (isinstance(iindexer, slice) and iindexer == slice(None)):
-            if not partition_sizes:
-                cls = obj.__class__.__name__
-                raise NotImplementedError(
-                    "%s.iloc only supported for %s with known partition_sizes"
-                    % (cls, cls)
-                )
-
-            _len = obj._len
-
-            if isinstance(iindexer, slice):
-                # TODO: use step-size here?
-                start, stop, _ = (
-                    (iindexer.start or 0),
-                    (iindexer.stop if iindexer.stop is not None else _len),
-                    (iindexer.step or 1),
-                )
-                if start < 0:
-                    start += _len
-                if stop < 0:
-                    stop += _len
-                m, M = min(start, stop), max(start, stop)
-                m = np.clip(m, 0, _len)
-                M = np.clip(M, 0, _len)
-
-                partition_data = [
-                    dict(partition_idx=partition_idx, start=start, end=end, m=m, M=M)
-                    for partition_idx, (start, end) in enumerate(
-                        obj.partition_idx_ranges
-                    )
-                    if start < M and end > m
-                ]
-
-                if not partition_data:
-                    # The passed slice either begins after obj's end, or is empty and falls at a partition
-                    # boundary (e.g. 0:0, N:N for N == partition_sizes[0], etc.)
-                    if m > _len:
-                        partition_data = [
-                            dict(
-                                partition_idx=partition_idx,
-                                start=start,
-                                end=end,
-                                m=m,
-                                M=M,
-                            )
-                            for partition_idx, (start, end) in list(
-                                enumerate(obj.partition_idx_ranges)
-                            )[-1:]
-                        ]
-                    else:
-                        partition_data = [
-                            dict(
-                                partition_idx=partition_idx,
-                                start=start,
-                                end=end,
-                                m=m,
-                                M=M,
-                            )
-                            for partition_idx, (start, end) in enumerate(
-                                obj.partition_idx_ranges
-                            )
-                            if start <= M and end >= m
-                        ][:1]
-
-                first_partition = partition_data[0]
-                first_partition_idx = first_partition["partition_idx"]
-                first_full_partition_idx = first_partition_idx
-
-                last_partition = partition_data[-1]
-                last_partition_idx = last_partition["partition_idx"]
-                last_full_partition_idx = last_partition_idx
-
-                partition_end_idx = last_partition_idx + 1
-                divisions = list(
-                    obj.divisions[first_partition_idx : (partition_end_idx + 1)]
-                )
-
-                partial_prefix = None
-                partial_suffix = None
-                partition_sizes_prefix = ()
-                partition_sizes_suffix = ()
-
-                assert first_partition["start"] <= first_partition["m"]
-                has_partial_prefix = first_partition["start"] < first_partition["m"]
-
-                assert last_partition["end"] >= last_partition["M"]
-                has_partial_suffix = last_partition["end"] > last_partition["M"]
-
-                has_clipped_single_partition = (
-                    has_partial_prefix
-                    and has_partial_suffix
-                    and first_partition_idx == last_partition_idx
-                )
-
-                if has_partial_prefix:
-                    divisions[0] = None
-                    first_full_partition_idx += 1
-                    start = first_partition["m"] - first_partition["start"]
-                    end = min(first_partition["end"], first_partition["M"])
-                    drop_right = first_partition["end"] - end
-                    partition_sizes_prefix = (
-                        partition_sizes[first_partition_idx] - start - drop_right,
-                    )
-                    partial_prefix = obj.partitions[first_partition_idx].map_partitions(
-                        lambda df, start, drop_right: df.iloc[start:-drop_right]
-                        if drop_right
-                        else df.iloc[start:],
-                        start,
-                        drop_right,
-                    )
-
-                if last_partition["end"] != last_partition["M"]:
-                    divisions[-1] = None
-                    last_full_partition_idx -= 1
-                    if not has_clipped_single_partition:
-                        # Only compute+set a "suffix" if the partial final partition is not the same
-                        # as a partial initial partition (handled above)
-                        end = last_partition["end"] - last_partition["M"]
-                        partition_sizes_suffix = (
-                            partition_sizes[last_partition_idx] - end,
-                        )
-                        partial_suffix = obj.partitions[
-                            last_partition_idx
-                        ].map_partitions(lambda df, end: df.iloc[:-end], end)
-
-                full_partition_idx_range = slice(
-                    first_full_partition_idx, last_full_partition_idx + 1
-                )
-                num_full_partitions = max(
-                    0, last_full_partition_idx + 1 - first_full_partition_idx
-                )
-                new_partition_sizes = (
-                    partition_sizes_prefix
-                    + partition_sizes[full_partition_idx_range]
-                    + partition_sizes_suffix
-                )
-
-                keys = []
-                dependencies = []
-
-                if partial_prefix is not None:
-                    keys.append((partial_prefix._name, 0))
-                    dependencies.append(partial_prefix)
-
-                if num_full_partitions:
-                    keys += [
-                        (obj._name, first_full_partition_idx + idx)
-                        for idx in range(num_full_partitions)
-                    ]
-                    dependencies.append(obj)
-
-                if partial_suffix is not None:
-                    keys.append((partial_suffix._name, 0))
-                    dependencies.append(partial_suffix)
-
-                name = "iloc-%s" % tokenize(obj, key)
-                dsk = {(name, idx): key for idx, key in enumerate(keys)}
-                meta = obj._meta
-                graph = HighLevelGraph.from_collections(
-                    name, dsk, dependencies=dependencies
-                )
-                row_sliced = new_dd_object(
-                    graph,
-                    name,
-                    meta=meta,
-                    divisions=divisions,
-                    partition_sizes=new_partition_sizes,
-                )
-                if cindexer == slice(None):
-                    return row_sliced
-                else:
-                    return row_sliced.iloc[:, cindexer]
-            elif isinstance(iindexer, (list, pd.Series, np.ndarray)):
-                if isinstance(iindexer, (pd.Series, np.ndarray)):
-                    if iindexer.dtype != np.dtype(int):
-                        raise ValueError(
-                            "%s dtype must be int, got %s: %s"
-                            % (type(iindexer).__name__, iindexer.dtype, iindexer)
-                        )
-                    if isinstance(iindexer, pd.Series):
-                        iindexer = iindexer.values
-                    iindexer = iindexer.tolist()
-                iindexer = sorted([idx + _len if idx < 0 else idx for idx in iindexer])
-                all_partition_idxs = {}
-                cur_partition_idxs = []
-                idx_pos = 0
-                num_idxs = len(iindexer)
-                partition_ends = np.cumsum(partition_sizes).tolist()
-                npartitions = len(partition_ends)
-                partition_idx = 0
-                cur_partition_end = partition_ends[0]
-                while idx_pos < num_idxs:
-                    idx = iindexer[idx_pos]
-                    while idx >= cur_partition_end:
-                        if cur_partition_idxs:
-                            all_partition_idxs[partition_idx] = cur_partition_idxs
-                            cur_partition_idxs = []
-                        partition_idx += 1
-                        if partition_idx == npartitions:
-                            break
-                        cur_partition_end = partition_ends[partition_idx]
-                    cur_partition_idxs.append(idx)
-                    idx_pos += 1
-                if cur_partition_idxs:
-                    all_partition_idxs[partition_idx] = cur_partition_idxs
-
-                name = "iloc-%s" % tokenize(obj, key)
-
-                def iloc(d, idxs):
-                    return d.iloc[idxs]
-
-                dsk = {
-                    (name, idx): (iloc, (obj._name, partition_idx), idxs)
-                    for idx, (partition_idx, idxs) in enumerate(
-                        all_partition_idxs.items()
-                    )
-                }
-                meta = obj._meta
-                graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
-                row_sliced = new_dd_object(
-                    graph,
-                    name,
-                    meta=meta,
-                    divisions=[None] * (len(all_partition_idxs) + 1),
-                    partition_sizes=[len(idxs) for idxs in all_partition_idxs.values()],
-                )
-                if cindexer == slice(None):
-                    return row_sliced
-                else:
-                    return row_sliced.iloc[:, cindexer]
-            else:
-                raise ValueError("Unexpected iindexer: %s" % str(iindexer))
-        else:
+        elif isinstance(iindexer, Array):
+            if len(iindexer.shape) != 1:
+                raise ValueError("Can only slice %s's with 1-d Arrays, not %d (shape: %s)" % (type(self), len(iindexer.shape), str(iindexer.shape)))
+            iindexer = from_dask_array(iindexer, index=obj.index)
+            return obj.loc[iindexer, cindexer]
+        elif isinstance(iindexer, slice) and iindexer == slice(None):
             if cindexer == slice(None):
                 return obj
             from dask.dataframe import DataFrame
@@ -341,6 +114,248 @@ class _iLocIndexer(_IndexerBase):
                 # otherwise dispatch to dask.dataframe.core.DataFrame.__getitem__
                 col_names = obj.columns[cindexer]
                 return obj.__getitem__(col_names)
+        else:
+            # slice, list, pd.Series, ndarray
+            if not partition_sizes:
+                cls = obj.__class__.__name__
+                raise NotImplementedError(
+                    "%s.iloc only supported for %s with known partition_sizes"
+                    % (cls, cls)
+                )
+
+            _len = obj._len
+
+            if isinstance(iindexer, (slice, range)):
+                start, stop, step = (
+                    (iindexer.start or 0),
+                    (iindexer.stop if iindexer.stop is not None else _len),
+                    (iindexer.step or 1),
+                )
+                if isinstance(iindexer, slice):
+                    # normalize negative indices
+                    if start < 0:
+                        start += _len
+                    if stop < 0:
+                        stop += _len
+                    typ = slice
+                elif isinstance(iindexer, range):
+                    if start < 0:
+                        if stop > 0 and step > 0:
+                            negatives = obj.iloc[range(start,0,step)]
+                            first_positive_idx = step - ((-start) % step or step)
+                            positives = obj.iloc[range(first_positive_idx,stop,step)]
+                            return concat([negatives, positives])
+                        else:
+                            start += _len
+                            stop += _len
+                    elif stop < 0:
+                        if start < 0:
+                            start += _len
+                            stop += _len
+                        else:
+                            if stop < -1 and step < 0:
+                                # these will both end up empty if step is positive, otherwise this partitions the non-negative indices from the negatives
+                                positives = obj.iloc[range(start,-1,step)]
+                                first_negative_idx = start % abs(step) + step
+                                negatives = obj.iloc[range(first_negative_idx,stop,step)]
+                                return concat([positives, negatives])
+                    typ = range
+
+                name = "iloc-%s" % tokenize(obj, key)
+                dsk = {}
+
+                if step > 0 and stop <= start or step < 0 and start <= stop:
+                    # return empty DataFrame
+                    pass
+                else:
+                    partition_idx_ranges = obj.partition_idx_ranges
+                    npartitions = obj.npartitions
+
+                    def intersect(lo, hi, start, stop, step):
+                        if step > 0:
+                            if stop <= lo or start >= hi:
+                                return None
+                            if start < lo:
+                                start = lo + step - ((lo - start) % step or step)
+                            stop = min(hi, stop)
+                        else:
+                            hi -= 1
+                            if start < lo or stop >= hi:
+                                return None
+                            if start > hi:
+                                start = hi + step + ((start-hi) % abs(step) or abs(step))
+                            stop = max(lo-1, stop)
+
+                        start -= lo
+                        stop -= lo
+
+                        return typ(start, stop, step), (stop - start) // step
+
+                    partition_slices = [
+                        intersect(lo, hi, start, stop, step)
+                        for lo, hi in partition_idx_ranges
+                    ]
+
+                    start_partition_idx = 0
+                    while start_partition_idx < npartitions and partition_slices[start_partition_idx] is None:
+                        start_partition_idx += 1
+
+                    end_partition_idx = npartitions
+                    while end_partition_idx > start_partition_idx and partition_slices[end_partition_idx-1] is None:
+                        end_partition_idx -= 1
+
+                    new_npartitions = end_partition_idx - start_partition_idx
+                    partition_slices = partition_slices[start_partition_idx:end_partition_idx]
+                    new_divisions = obj.divisions[start_partition_idx:end_partition_idx+1]
+                    assert not any(slc is None for slc in partition_slices)
+
+                    def iloc(df, slc):
+                        return df.iloc[slc]
+
+                    new_partition_sizes = []
+                    for partition_idx, slc in enumerate(partition_slices):
+                        original_partition_idx = partition_idx + start_partition_idx
+                        if step > 0:
+                            new_partition_idx = partition_idx
+                        else:
+                            new_partition_idx = new_npartitions - 1 - partition_idx
+                        if slc == slice(None, None, None):
+                            dsk[(name, new_partition_idx)] = (lambda x: x, (obj._name, original_partition_idx))
+                            new_partition_sizes.append(partition_sizes[original_partition_idx])
+                        else:
+                            slc, size = slc
+                            dsk[(name, new_partition_idx)] = (iloc, (obj._name, original_partition_idx), slc)
+                            new_partition_sizes.append(size)
+
+                    if step < 0:
+                        new_partition_sizes = tuple(reversed(new_partition_sizes))
+                        new_divisions = tuple(reversed(new_divisions))
+
+                if not dsk:
+                    new_divisions = (None, None)
+                    new_partition_sizes = (0,)
+                    dsk = {
+                        (name, 0): obj._meta
+                    }
+
+                # dsk = {(name, idx): key for idx, key in enumerate(keys)}
+                meta = obj._meta
+                graph = HighLevelGraph.from_collections(
+                    name, dsk, dependencies=[obj]
+                )
+                row_sliced = new_dd_object(
+                    graph,
+                    name,
+                    meta=meta,
+                    divisions=new_divisions,
+                    partition_sizes=new_partition_sizes,
+                )
+                if cindexer == slice(None):
+                    return row_sliced
+                else:
+                    return row_sliced.iloc[:, cindexer]
+            elif isinstance(iindexer, (list, pd.Series, np.ndarray)):
+                # unify iindexer to be an ndarray
+                if isinstance(iindexer, list):
+                    iindexer = np.array(iindexer)
+                elif isinstance(iindexer, pd.Series):
+                    iindexer = iindexer.values
+                else:
+                    if len(iindexer.shape) != 1:
+                        raise RuntimeError("Can only slice %s's with ndarrays of rank 1" % type(self))
+
+                if iindexer.dtype == np.dtype(int):
+                    iindexer = list(sorted(idx + _len if idx < 0 else idx for idx in iindexer))
+                    all_partition_idxs = {}
+                    cur_partition_idxs = []
+                    idx_pos = 0
+                    num_idxs = len(iindexer)
+                    partition_ends = np.cumsum(partition_sizes).tolist()
+                    npartitions = len(partition_ends)
+                    partition_idx = 0
+                    cur_partition_end = partition_ends[0]
+                    while idx_pos < num_idxs:
+                        idx = iindexer[idx_pos]
+                        while idx >= cur_partition_end:
+                            if cur_partition_idxs:
+                                all_partition_idxs[partition_idx] = cur_partition_idxs
+                                cur_partition_idxs = []
+                            partition_idx += 1
+                            if partition_idx == npartitions:
+                                break
+                            cur_partition_end = partition_ends[partition_idx]
+                        cur_partition_idxs.append(idx)
+                        idx_pos += 1
+                    if cur_partition_idxs:
+                        all_partition_idxs[partition_idx] = cur_partition_idxs
+
+                    name = "iloc-%s" % tokenize(obj, key)
+
+                    # TODO: is this layer of indirection necessary?
+                    def iloc(d, idxs):
+                        return d.iloc[idxs]
+
+                    dsk = {
+                        (name, idx): (iloc, (obj._name, partition_idx), idxs)
+                        for idx, (partition_idx, idxs) in enumerate(
+                            all_partition_idxs.items()
+                        )
+                    }
+                    meta = obj._meta
+                    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
+                    row_sliced = new_dd_object(
+                        graph,
+                        name,
+                        meta=meta,
+                        divisions=[None] * (len(all_partition_idxs) + 1),
+                        partition_sizes=[len(idxs) for idxs in all_partition_idxs.values()],
+                    )
+                    # TODO: fold cindexer into the transform above
+                    if cindexer == slice(None):
+                        return row_sliced
+                    else:
+                        return row_sliced.iloc[:, cindexer]
+                elif iindexer.dtype == np.dtype(bool):
+                    partition_bounds = obj.partition_idx_ranges
+                    name = "iloc-%s" % tokenize(obj, key)
+
+                    # TODO: is this layer of indirection necessary?
+                    def iloc(d, idxs):
+                        return d.iloc[idxs]
+
+                    all_partition_idxs = {}
+                    new_partition_sizes = []
+                    for idx, (start, end) in enumerate(partition_bounds):
+                        idxs = iindexer[start:end]
+                        size = idxs.sum()
+                        all_partition_idxs[idx] = idxs
+                        new_partition_sizes.append(size)
+
+                    dsk = {
+                        (name, idx): (iloc, (obj._name, idx), idxs)
+                        for idx, idxs in all_partition_idxs.items()
+                    }
+                    meta = obj._meta
+                    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
+                    row_sliced = new_dd_object(
+                        graph,
+                        name,
+                        meta=meta,
+                        divisions=[None] * (obj.npartitions + 1),
+                        partition_sizes=new_partition_sizes,
+                    )
+                    # TODO: fold cindexer into the transform above
+                    if cindexer == slice(None):
+                        return row_sliced
+                    else:
+                        return row_sliced.iloc[:, cindexer]
+                else:
+                    raise ValueError(
+                        "%s dtype must be int or bool, got %s: %s"
+                        % (type(iindexer).__name__, iindexer.dtype, iindexer)
+                    )
+            else:
+                raise ValueError("Unexpected iindexer: %s" % str(iindexer))
 
     def _iloc(self, iindexer, cindexer):
         assert iindexer == slice(None)

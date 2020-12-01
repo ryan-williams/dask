@@ -453,6 +453,11 @@ def from_dask_array(x, columns=None, index=None, meta=None):
     if index is not None:
         if not isinstance(index, Index):
             raise ValueError("'index' must be an instance of dask.dataframe.Index")
+        partition_sizes = index.partition_sizes
+        if partition_sizes:
+            chunks = x.chunks[0]
+            if partition_sizes != chunks:
+                x = x.rechunk({0: partition_sizes})
         if index.npartitions != x.numblocks[0]:
             msg = (
                 "The index and array have different numbers of blocks. "
