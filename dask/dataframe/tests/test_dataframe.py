@@ -338,10 +338,24 @@ class Checks:
         np.random.seed(seed)
 
     def check(self, fn, pandas_fn=None):
-        l = fn(self.dask).compute()
+        l_exc = None
+        try:
+            l = fn(self.dask).compute()
+        except Exception as exc:
+            l_exc = exc
+
         pandas_fn = pandas_fn or fn
-        r = pandas_fn(self.pandas)
-        self.cmp(l, r)
+        r_exc = None
+        try:
+            r = pandas_fn(self.pandas)
+        except Exception as exc:
+            r_exc = exc
+
+        if l_exc or r_exc:
+            # TODO: match error msgs
+            assert type(l_exc) == type(r_exc)
+        else:
+            self.cmp(l, r)
 
     bools = np.random.choice(a=[False, True], size=(100,), p=[.5,.5])
 
