@@ -373,7 +373,6 @@ class Checks:
         steps = [None] + [sgn*i for i in [1, 2, 5, 30, 70, 99, 100] for sgn in [1,-1]]
 
         def check(idx, args):
-            print('%d: %s' % (idx, args))
             self.check(lambda df: df.iloc[range(*args)])
 
         idx = 0
@@ -399,161 +398,85 @@ class Checks:
                     except AssertionError as e:
                         self.assertTrue(False)
 
-        #     check(1)
-        #     check(0, i)
-        #     check(0, i, 2)
-        #     check(0, i, 9)
-        #     check(0, i, 70)
-        #     check(0, i, 99)
-        #     check(0, i, 100)
-        #     check(i, -1, -1)
-        #
-        # check(0,1)
-        # check(0,10)
-        # check(0,100)
-        #
-        # check(34)
-        # check(0,34)
-        # check(10,34)
-        #
-        # check(10,24)
-        #
-        # check(0,10)
-        #
-        # # 2nd partition
-        # check(34,68)
-        # check(35,68)
-        # check(34,67)
-        # check(35,67)
-        # check(40,50)
-        #
-        # # 3rd/last partition:
-        # check(68,100)
-        # check(69,100)
-        # check(68,99)
-        # check(69,99)
-        # check(68,-1)
-        # check(69,-1)
-        #
-        # # empty slices
-        # check(0,0)
-        # check(1,1)
-        # check(10,10)
-        # check(33,33)
-        # check(34,34)
-        # check(35,35)
-        # check(99,99)
-        # check(100,100)
-        # check(-1,-1)
-        # check(-100,-100)
-        # check(101,101)
-        # check(200,200)
-        # check(-101,-101)
-        # check(-200,-200)
-        #
-        # # across partitions:
-        # check(10,90)
-        # check(10,-10)
-        # check(-90,-10)
-        # check(1,-1)
-        # check(-99,99)
-        # check(50)
-        # check(1,50)
-        # check(33,50)
-        # check(68)
-        # check(1,68)
-        # check(33,68)
-        # check(69)
-        # check(1,69)
-        # check(33,69)
-        # check(34,69)
-        # check(35,69)
-        #
-        # check(200)
-        # check(0,200)
-        # check(10,200)
-        # check(50,200)
-        # check(90,200)
-        #
-        # check(0,100,2])
-        # check(99,-1,-1)
-
     def test_slices(self):
-        def check(slc):
-            self.check(lambda df: df.iloc[slc])
+        class Check:
+            def __getitem__(slf, slc):
+                self.check(lambda df: df.iloc[slc])
 
-        check(lambda df: df[:100])
-        check(lambda df: df[:])
-        check(lambda df: df[0:100])
+        check = Check()
 
-        check(lambda df: df[:34])
-        check(lambda df: df[0:34])
-        check(lambda df: df[10:34])
+        check[:100] # (lambda df: df[:100])
+        check[:]
+        check[0:100]
 
-        check(lambda df: df[10:24])
+        check[:34]
+        check[0:34]
+        check[10:34]
 
-        check(lambda df: df[:10])
-        check(lambda df: df[0:10])
+        check[10:24]
+
+        check[:10]
+        check[0:10]
 
         # 2nd partition
-        check(lambda df: df[34:68])
-        check(lambda df: df[35:68])
-        check(lambda df: df[34:67])
-        check(lambda df: df[35:67])
-        check(lambda df: df[40:50])
+        check[34:68]
+        check[35:68]
+        check[34:67]
+        check[35:67]
+        check[40:50]
 
         # 3rd/last partition:
-        check(lambda df: df[68:100])
-        check(lambda df: df[69:100])
-        check(lambda df: df[68:])
-        check(lambda df: df[69:])
-        check(lambda df: df[68:99])
-        check(lambda df: df[69:99])
-        check(lambda df: df[68:-1])
-        check(lambda df: df[69:-1])
+        check[68:100]
+        check[69:100]
+        check[68:]
+        check[69:]
+        check[68:99]
+        check[69:99]
+        check[68:-1]
+        check[69:-1]
 
         # empty slices
-        check(lambda df: df[0:0])
-        check(lambda df: df[1:1])
-        check(lambda df: df[10:10])
-        check(lambda df: df[33:33])
-        check(lambda df: df[34:34])
-        check(lambda df: df[35:35])
-        check(lambda df: df[99:99])
-        check(lambda df: df[100:100])
-        check(lambda df: df[-1:-1])
-        check(lambda df: df[-100:-100])
-        check(lambda df: df[101:101])
-        check(lambda df: df[200:200])
-        check(lambda df: df[-101:-101])
-        check(lambda df: df[-200:-200])
+        check[0:0]
+        check[1:1]
+        check[10:10]
+        check[33:33]
+        check[34:34]
+        check[35:35]
+        check[99:99]
+        check[100:100]
+        check[-1:-1]
+        check[-100:-100]
+        check[101:101]
+        check[200:200]
+        check[-101:-101]
+        check[-200:-200]
 
         # across partitions:
-        check(lambda df: df[10:90])
-        check(lambda df: df[10:-10])
-        check(lambda df: df[-90:-10])
-        check(lambda df: df[1:-1])
-        check(lambda df: df[-99:99])
-        check(lambda df: df[:50])
-        check(lambda df: df[1:50])
-        check(lambda df: df[33:50])
-        check(lambda df: df[:68])
-        check(lambda df: df[1:68])
-        check(lambda df: df[33:68])
-        check(lambda df: df[:69])
-        check(lambda df: df[1:69])
-        check(lambda df: df[33:69])
-        check(lambda df: df[34:69])
-        check(lambda df: df[35:69])
+        check[10:90]
+        check[10:-10]
+        check[-90:-10]
+        check[1:-1]
+        check[-99:99]
+        check[:50]
+        check[1:50]
+        check[33:50]
+        check[:68]
+        check[1:68]
+        check[33:68]
+        check[:69]
+        check[1:69]
+        check[33:69]
+        check[34:69]
+        check[35:69]
 
-        check(lambda df: df[:200])
-        check(lambda df: df[0:200])
-        check(lambda df: df[10:200])
-        check(lambda df: df[50:200])
-        check(lambda df: df[90:200])
+        check[:200]
+        check[0:200]
+        check[10:200]
+        check[50:200]
+        check[90:200]
 
-        check(lambda df: df[::2])
-        check(lambda df: df[99:-1:-1])
+        check[::2]
+        check[99:-1:-1]
 
     def test_arrays(self):
         def check_arr_slice(chunks=None):

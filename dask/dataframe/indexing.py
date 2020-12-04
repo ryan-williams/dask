@@ -94,7 +94,11 @@ class _iLocIndexer(_IndexerBase):
             if len(iindexer.shape) != 1:
                 raise ValueError("Can only slice %s's with 1-d Arrays, not %d (shape: %s)" % (type(self), len(iindexer.shape), str(iindexer.shape)))
             iindexer = from_dask_array(iindexer, index=obj.index)
-            return obj.loc[iindexer, cindexer]
+            if obj.ndim == 1:
+                assert cindexer == slice(None, None, None)
+                return obj.loc[iindexer]
+            else:
+                return obj.loc[iindexer, cindexer]
         elif isinstance(iindexer, slice) and iindexer == slice(None):
             if cindexer == slice(None):
                 return obj
@@ -191,9 +195,10 @@ class _iLocIndexer(_IndexerBase):
 
                         return typ(start, stop, step), (stop - start) // step
 
-                    max_idx = start if start > stop else stop - step
-                    if max_idx >= _len:
-                        raise IndexError("Out of bounds: %d >= %d (key %s)" % (max_idx, _len, str(key)))
+                    if isinstance(iindexer, range):
+                        max_idx = start if start > stop else stop - step
+                        if max_idx >= _len:
+                            raise IndexError("Out of bounds: %d >= %d (key %s)" % (max_idx, _len, str(key)))
                     partition_slices = [
                         intersect(lo, hi, start, stop, step)
                         for lo, hi in partition_idx_ranges
