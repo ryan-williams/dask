@@ -931,9 +931,11 @@ def check_index(ind, dimension):
     IndexError: Boolean array length 3 doesn't equal dimension 1
     """
     # unknown dimension, assumed to be in bounds
+    import pandas as pd
+
     if np.isnan(dimension):
         return
-    elif isinstance(ind, (list, np.ndarray)):
+    elif isinstance(ind, (list, np.ndarray, pd.Series)):
         x = np.asanyarray(ind)
         if x.dtype == bool:
             if x.size != dimension:
