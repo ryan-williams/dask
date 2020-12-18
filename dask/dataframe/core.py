@@ -1340,7 +1340,18 @@ Dask Name: {name}, {task} tasks"""
             )
 
         if isinstance(key, Series):
-            return map_partitions(operator.getitem, self, key, meta=self._meta)
+            # do not perform dummy calculation, as columns will not be changed.
+            #
+            if self.divisions != key.divisions:
+                from .multi import _maybe_align_partitions
+
+                self, key = _maybe_align_partitions([self, key])
+            dsk = partitionwise_graph(operator.getitem, name, self, key)
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
+            return new_dd_object(graph, name, self, self.divisions)
+
+        if isinstance(key, DataFrame):
+            return self.where(key, np.nan)
 
         if isinstance(key, Array):
             shape = key.shape
@@ -1379,8 +1390,6 @@ Dask Name: {name}, {task} tasks"""
                 raise NotImplementedError("TODO: implement slicing %s's with Arrays of ints" % type(self))
 
         raise NotImplementedError(key)
-
-    # Note: iloc is implemented only on DataFrame
 
     def repartition(
         self,
@@ -3386,16 +3395,6 @@ Dask Name: {name}, {task} tasks""".format(
         from .partitionquantiles import partition_quantiles
 
         return partition_quantiles(self, npartitions, upsample=upsample)
-
-    # def __getitem__(self, key):
-    #     if isinstance(key, Series):
-    #         return map_partitions(operator.getitem, self, key, meta=self._meta)
-    #     elif self.partition_sizes and isinstance(key, (slice, list)):
-    #         pass
-    #     raise NotImplementedError(
-    #         "Series getitem in only supported for other series objects "
-    #         "with matching partition structure"
-    #     )
 
     @derived_from(pd.DataFrame)
     def _get_numeric_data(self, how="any", subset=None):
