@@ -336,6 +336,12 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
     def _constructor(self):
         return new_dd_object
 
+    def persist(self, **kwargs):
+        result = DaskMethodsMixin.persist(self, **kwargs)
+        result.divisions = self.divisions
+        result.partition_sizes = self.partition_sizes
+        return result
+
     @property
     def npartitions(self):
         """Return number of partitions"""
