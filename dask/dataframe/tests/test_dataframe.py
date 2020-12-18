@@ -6,6 +6,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from pandas.io.formats import format as pandas_format
+from pandas.testing import assert_frame_equal
 
 import dask
 import dask.array as da
@@ -14,7 +15,7 @@ import dask.dataframe as dd
 from dask.blockwise import fuse_roots
 from dask.dataframe import _compat
 from dask.dataframe._compat import tm, PANDAS_GT_100, PANDAS_GT_110
-from dask.base import compute_as_if_collection
+from dask.base import compute, compute_as_if_collection
 from dask.utils import put_lines, M
 
 from dask.dataframe.core import (
@@ -205,6 +206,100 @@ def test_attributes():
 
     df = dd.from_pandas(_compat.makeTimeDataFrame(), npartitions=3)
     pytest.raises(AttributeError, lambda: df.foo)
+
+
+def test_partition_sizes():
+    df = dd.from_pandas(
+        pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)]), npartitions=3
+    )
+    assert df.partition_sizes == (34, 34, 32)
+    df["len"] = df.i.map(len)
+    assert df.partition_sizes == (34, 34, 32)
+    assert df["len"].partition_sizes == (34, 34, 32)
+    assert df["i"].partition_sizes == (34, 34, 32)
+    assert len(df.compute()) == 100
+    assert tuple(len(partition.compute()) for partition in df.partitions) == (
+        34,
+        34,
+        32,
+    )
+
+    for series in [
+        df.len + 2,
+        df.len - 2,
+        df.len * 2,
+        df.len / 2,
+        df.len % 2,
+        df.len % 2 == 0,
+    ]:
+        assert series.partition_sizes == (34, 34, 32)
+
+    evens = df.len % 2 == 0
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
+
+    # def test_array_series_slice():
+    from dask.array import from_array
+    from numpy import array
+
+    a = array(range(1100)).reshape((100, 11))
+    d = from_array(a, chunks=(23, 4))
+    assert d.chunks == ((23, 23, 23, 23, 8), (4, 4, 3))
+    from numpy.testing import assert_array_equal
+
+    dask_sliced = d[evens]
+    np_sliced = a[evens.compute()]
+    assert_array_equal(dask_sliced.compute(), np_sliced)
+
+
+def check_partition_sizes(df, *args, **kwargs):
+    if args or kwargs:
+        if args:
+            assert len(args) == 1
+            assert not kwargs
+            partition_sizes = args[0]
+        else:
+            assert not args
+            assert "partition_sizes" in kwargs
+            partition_sizes = kwargs.pop("partition_sizes")
+            assert not kwargs
+        assert df.partition_sizes == partition_sizes
+        if partition_sizes is not None:
+            computed = compute(*[partition for partition in df.partitions])
+            actual_sizes = tuple(len(partition) for partition in computed)
+            assert actual_sizes == partition_sizes
+    else:
+        computed = compute(*[partition for partition in df.partitions])
+        partition_sizes = tuple(len(partition) for partition in computed)
+        assert partition_sizes == df.partition_sizes
+
+
+def test_repartition_sizes():
+    df = dd.from_pandas(
+        pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)]), npartitions=3
+    )
+    check_partition_sizes(df, (34, 34, 32))
+    df["len"] = df.i.map(len)
+    assert df.partition_sizes == (34, 34, 32)
+    assert df["len"].partition_sizes == (34, 34, 32)
+    assert df["i"].partition_sizes == (34, 34, 32)
+    assert len(df.compute()) == 100
+
+    evens = df.len % 2 == 0
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
+
+    df2 = df.repartition(partition_sizes=(40, 40, 20))
+    from pandas.testing import assert_frame_equal
+
+    assert_frame_equal(df.compute(), df2.compute())
+    check_partition_sizes(df2, (40, 40, 20))
+
+    df3 = df.repartition(partition_sizes=[10] * 10)
+    from pandas.testing import assert_frame_equal
+
+    assert_frame_equal(df.compute(), df3.compute())
+    check_partition_sizes(df3, (10,) * 10)
 
 
 def test_column_names():
