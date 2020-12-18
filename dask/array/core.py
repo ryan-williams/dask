@@ -1599,6 +1599,22 @@ class Array(DaskMethodsMixin):
             )
 
     def __getitem__(self, index):
+        from dask.dataframe import Series
+
+        if isinstance(index, Series):
+            from numpy import dtype
+
+            if not index.dtype == dtype(bool):
+                raise ValueError(
+                    "Slicing by %s series not supported, only bools" % index.dtype
+                )
+            if index.partition_sizes is not None:
+                partition_sizes = self.chunks[0]
+                series = index.repartition(partition_sizes=partition_sizes)
+                return self[series.to_dask_array(lengths=True)]
+            else:
+                return self[index.to_dask_array(lengths=True)]
+
         # Field access, e.g. x['a'] or x[['a', 'b']]
         if isinstance(index, str) or (
             isinstance(index, list) and index and all(isinstance(i, str) for i in index)
