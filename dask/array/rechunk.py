@@ -130,10 +130,10 @@ def _old_to_new(old_chunks, new_chunks):
     """
     # if new_chunks is full of NaNs on a dimension where the existing chunks are known, pass through the existing
     # chunk-sizes on that dimension
-    new_chunks = [
-        o if all(math.isnan(y) for y in n) and not any(math.isnan(x) for x in o) else n
-        for o, n in zip(old_chunks, new_chunks)
-    ]
+    # new_chunks = [
+    #     o if all(math.isnan(y) for y in n) and not any(math.isnan(x) for x in o) else n
+    #     for o, n in zip(old_chunks, new_chunks)
+    # ]
 
     old_known = [x for x in old_chunks if not any(math.isnan(y) for y in x)]
     new_known = [x for x in new_chunks if not any(math.isnan(y) for y in x)]
