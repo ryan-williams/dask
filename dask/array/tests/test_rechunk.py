@@ -515,6 +515,15 @@ def test_rechunk_unknown_from_pandas():
     arr = np.random.randn(50, 10)
     x = dd.from_pandas(pd.DataFrame(arr), 2).values
     result = x.rechunk((None, (5, 5)))
+    assert x.chunks == ((25, 25), (10,))
+    assert result.chunks == ((25, 25), (5, 5))
+    expected = da.from_array(arr, chunks=((25, 25), (10,))).rechunk((None, (5, 5)))
+    assert_eq(result, expected)
+
+    df = dd.from_pandas(pd.DataFrame(arr), 2)
+    df.partition_sizes = None
+    x = df.values
+    result = x.rechunk((None, (5, 5)))
     assert np.isnan(x.chunks[0]).all()
     assert np.isnan(result.chunks[0]).all()
     assert result.chunks[1] == (5, 5)
@@ -524,13 +533,10 @@ def test_rechunk_unknown_from_pandas():
 
 def test_rechunk_unknown_from_array():
     dd = pytest.importorskip("dask.dataframe")
-    # pd = pytest.importorskip('pandas')
     x = dd.from_array(da.ones(shape=(4, 4), chunks=(2, 2))).values
-    # result = x.rechunk({1: 5})
     result = x.rechunk((None, 4))
-    assert np.isnan(x.chunks[0]).all()
-    assert np.isnan(result.chunks[0]).all()
-    assert x.chunks[1] == (4,)
+    assert x.chunks == ((2,2),(4,))
+    assert result.chunks == ((2,2),(4,))
     assert_eq(x, result)
 
 
