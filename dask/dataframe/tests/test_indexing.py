@@ -310,8 +310,7 @@ def test_getitem_integer_slice():
     df = pd.DataFrame({"A": range(6)})
     ddf = dd.from_pandas(df, 2)
     # integer slicing is iloc based
-    with pytest.raises(NotImplementedError):
-        ddf[1:3]
+    assert_eq(ddf[1:3], df[1:3])
 
     df = pd.DataFrame({"A": range(6)}, index=[1.0, 2.0, 3.0, 5.0, 10.0, 11.0])
     ddf = dd.from_pandas(df, 2)
