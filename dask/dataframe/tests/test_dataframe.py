@@ -335,7 +335,7 @@ class Checks:
         else:
             self.cmp(l, r)
 
-    bools = np.random.choice(a=[False, True], size=(100,), p=[.5,.5])
+    bools = np.random.choice(a=[False, True], size=(100,), p=[0.5, 0.5])
 
     def check_arr_slice(self, elems, chunks=None):
         pnds_key = np.array(elems)
@@ -348,7 +348,9 @@ class Checks:
 
     def test_ranges(self):
         idxs = (None, 0, 1, 10, 33, 34, 35, 68, 69, 70, 99, 100)
-        steps = [None] + [sgn*i for i in [1, 2, 5, 30, 70, 99, 100] for sgn in [1,-1]]
+        steps = [None] + [
+            sgn * i for i in [1, 2, 5, 30, 70, 99, 100] for sgn in [1, -1]
+        ]
 
         def check(idx, args):
             self.check(lambda df: df.iloc[range(*args)])
@@ -356,7 +358,8 @@ class Checks:
         idx = 0
         for start in idxs:
             for end in idxs:
-                if end is None: continue
+                if end is None:
+                    continue
                 for step in steps:
                     if step is not None:
                         if step < 0:
@@ -365,10 +368,10 @@ class Checks:
                     if start is None:
                         args = (end,)
                     else:
-                        args = (start,end)
+                        args = (start, end)
 
                     if step is not None:
-                        args = (*args,step)
+                        args = (*args, step)
 
                     try:
                         check(idx, args)
@@ -383,7 +386,7 @@ class Checks:
 
         check = Check()
 
-        check[:100] # (lambda df: df[:100])
+        check[:100]  # (lambda df: df[:100])
         check[:]
         check[0:100]
 
@@ -459,12 +462,24 @@ class Checks:
     def test_arrays(self):
         def check_arr_slice(chunks=None):
             self.check_arr_slice(self.bools, chunks)
+
         check_arr_slice()
-        check_arr_slice((34,34,32,))
+        check_arr_slice(
+            (
+                34,
+                34,
+                32,
+            )
+        )
         check_arr_slice((100,))
-        check_arr_slice((50,50,))
-        check_arr_slice((10,)*10)
-        check_arr_slice((1,)*100)
+        check_arr_slice(
+            (
+                50,
+                50,
+            )
+        )
+        check_arr_slice((10,) * 10)
+        check_arr_slice((1,) * 100)
 
     # def test_ranges(self):
     #     def check(range):
@@ -473,10 +488,10 @@ class Checks:
     #     check(range(10))
 
     def test_ints(self):
-        #assert_frame_equal(self.df.iloc[range(10)], self.df.iloc[:10])
-        self.check(lambda df: df.iloc[range(  1)])
-        self.check(lambda df: df.iloc[range( 10)])
-        self.check(lambda df: df.iloc[range( 99)])
+        # assert_frame_equal(self.df.iloc[range(10)], self.df.iloc[:10])
+        self.check(lambda df: df.iloc[range(1)])
+        self.check(lambda df: df.iloc[range(10)])
+        self.check(lambda df: df.iloc[range(99)])
         self.check(lambda df: df.iloc[range(100)])
 
         self.check(lambda df: df.iloc[range(99, -1, -1)])
@@ -491,15 +506,21 @@ class Checks:
     # check(lambda df: df.iloc[34])
     # check(lambda df: df.iloc[-1])
 
+
 class DataFrameIloc(TestCase, Checks):
     dask = Checks.ddf
     pandas = Checks.df
-    def cmp(self, l, r): assert_frame_equal(l, r)
+
+    def cmp(self, l, r):
+        assert_frame_equal(l, r)
+
 
 class SeriesIloc(TestCase, Checks):
     dask = Checks.ddf.i
     pandas = Checks.df.i
-    def cmp(self, l, r): assert_series_equal(l, r)
+
+    def cmp(self, l, r):
+        assert_series_equal(l, r)
 
 
 def test_column_names():

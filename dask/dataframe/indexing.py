@@ -92,7 +92,10 @@ class _iLocIndexer(_IndexerBase):
                 )
         elif isinstance(iindexer, Array):
             if len(iindexer.shape) != 1:
-                raise ValueError("Can only slice %s's with 1-d Arrays, not %d (shape: %s)" % (type(self), len(iindexer.shape), str(iindexer.shape)))
+                raise ValueError(
+                    "Can only slice %s's with 1-d Arrays, not %d (shape: %s)"
+                    % (type(self), len(iindexer.shape), str(iindexer.shape))
+                )
             iindexer = from_dask_array(iindexer, index=obj.index)
             if obj.ndim == 1:
                 assert cindexer == slice(None, None, None)
@@ -145,9 +148,9 @@ class _iLocIndexer(_IndexerBase):
                 elif isinstance(iindexer, range):
                     if start < 0:
                         if stop > 0 and step > 0:
-                            negatives = obj.iloc[range(start,0,step)]
+                            negatives = obj.iloc[range(start, 0, step)]
                             first_positive_idx = step - ((-start) % step or step)
-                            positives = obj.iloc[range(first_positive_idx,stop,step)]
+                            positives = obj.iloc[range(first_positive_idx, stop, step)]
                             return concat([negatives, positives])
                         else:
                             start += _len
@@ -159,9 +162,11 @@ class _iLocIndexer(_IndexerBase):
                         else:
                             if stop < -1 and step < 0:
                                 # these will both end up empty if step is positive, otherwise this partitions the non-negative indices from the negatives
-                                positives = obj.iloc[range(start,-1,step)]
+                                positives = obj.iloc[range(start, -1, step)]
                                 first_negative_idx = start % abs(step) + step
-                                negatives = obj.iloc[range(first_negative_idx,stop,step)]
+                                negatives = obj.iloc[
+                                    range(first_negative_idx, stop, step)
+                                ]
                                 return concat([positives, negatives])
                     typ = range
 
@@ -187,8 +192,10 @@ class _iLocIndexer(_IndexerBase):
                             if start < lo or stop >= hi:
                                 return None
                             if start > hi:
-                                start = hi + step + ((start-hi) % abs(step) or abs(step))
-                            stop = max(lo-1, stop)
+                                start = (
+                                    hi + step + ((start - hi) % abs(step) or abs(step))
+                                )
+                            stop = max(lo - 1, stop)
 
                         start -= lo
                         stop -= lo
@@ -198,23 +205,36 @@ class _iLocIndexer(_IndexerBase):
                     if isinstance(iindexer, range):
                         max_idx = start if start > stop else stop - step
                         if max_idx >= _len:
-                            raise IndexError("Out of bounds: %d >= %d (key %s)" % (max_idx, _len, str(key)))
+                            raise IndexError(
+                                "Out of bounds: %d >= %d (key %s)"
+                                % (max_idx, _len, str(key))
+                            )
                     partition_slices = [
                         intersect(lo, hi, start, stop, step)
                         for lo, hi in partition_idx_ranges
                     ]
 
                     start_partition_idx = 0
-                    while start_partition_idx < npartitions and partition_slices[start_partition_idx] is None:
+                    while (
+                        start_partition_idx < npartitions
+                        and partition_slices[start_partition_idx] is None
+                    ):
                         start_partition_idx += 1
 
                     end_partition_idx = npartitions
-                    while end_partition_idx > start_partition_idx and partition_slices[end_partition_idx-1] is None:
+                    while (
+                        end_partition_idx > start_partition_idx
+                        and partition_slices[end_partition_idx - 1] is None
+                    ):
                         end_partition_idx -= 1
 
                     new_npartitions = end_partition_idx - start_partition_idx
-                    partition_slices = partition_slices[start_partition_idx:end_partition_idx]
-                    new_divisions = obj.divisions[start_partition_idx:end_partition_idx+1]
+                    partition_slices = partition_slices[
+                        start_partition_idx:end_partition_idx
+                    ]
+                    new_divisions = obj.divisions[
+                        start_partition_idx : end_partition_idx + 1
+                    ]
                     assert not any(slc is None for slc in partition_slices)
 
                     def iloc(df, slc):
@@ -228,11 +248,20 @@ class _iLocIndexer(_IndexerBase):
                         else:
                             new_partition_idx = new_npartitions - 1 - partition_idx
                         if slc == slice(None, None, None):
-                            dsk[(name, new_partition_idx)] = (lambda x: x, (obj._name, original_partition_idx))
-                            new_partition_sizes.append(partition_sizes[original_partition_idx])
+                            dsk[(name, new_partition_idx)] = (
+                                lambda x: x,
+                                (obj._name, original_partition_idx),
+                            )
+                            new_partition_sizes.append(
+                                partition_sizes[original_partition_idx]
+                            )
                         else:
                             slc, size = slc
-                            dsk[(name, new_partition_idx)] = (iloc, (obj._name, original_partition_idx), slc)
+                            dsk[(name, new_partition_idx)] = (
+                                iloc,
+                                (obj._name, original_partition_idx),
+                                slc,
+                            )
                             new_partition_sizes.append(size)
 
                     if step < 0:
@@ -242,14 +271,10 @@ class _iLocIndexer(_IndexerBase):
                 if not dsk:
                     new_divisions = (None, None)
                     new_partition_sizes = (0,)
-                    dsk = {
-                        (name, 0): obj._meta
-                    }
+                    dsk = {(name, 0): obj._meta}
 
                 meta = obj._meta
-                graph = HighLevelGraph.from_collections(
-                    name, dsk, dependencies=[obj]
-                )
+                graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
                 row_sliced = new_dd_object(
                     graph,
                     name,
@@ -269,10 +294,14 @@ class _iLocIndexer(_IndexerBase):
                     iindexer = iindexer.values
                 else:
                     if len(iindexer.shape) != 1:
-                        raise RuntimeError("Can only slice %s's with ndarrays of rank 1" % type(self))
+                        raise RuntimeError(
+                            "Can only slice %s's with ndarrays of rank 1" % type(self)
+                        )
 
                 if iindexer.dtype == np.dtype(int):
-                    iindexer = list(sorted(idx + _len if idx < 0 else idx for idx in iindexer))
+                    iindexer = list(
+                        sorted(idx + _len if idx < 0 else idx for idx in iindexer)
+                    )
                     all_partition_idxs = {}
                     cur_partition_idxs = []
                     idx_pos = 0
@@ -309,13 +338,17 @@ class _iLocIndexer(_IndexerBase):
                         )
                     }
                     meta = obj._meta
-                    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
+                    graph = HighLevelGraph.from_collections(
+                        name, dsk, dependencies=[obj]
+                    )
                     row_sliced = new_dd_object(
                         graph,
                         name,
                         meta=meta,
                         divisions=[None] * (len(all_partition_idxs) + 1),
-                        partition_sizes=[len(idxs) for idxs in all_partition_idxs.values()],
+                        partition_sizes=[
+                            len(idxs) for idxs in all_partition_idxs.values()
+                        ],
                     )
                     # TODO: fold cindexer into the transform above
                     if cindexer == slice(None):
@@ -343,7 +376,9 @@ class _iLocIndexer(_IndexerBase):
                         for idx, idxs in all_partition_idxs.items()
                     }
                     meta = obj._meta
-                    graph = HighLevelGraph.from_collections(name, dsk, dependencies=[obj])
+                    graph = HighLevelGraph.from_collections(
+                        name, dsk, dependencies=[obj]
+                    )
                     row_sliced = new_dd_object(
                         graph,
                         name,

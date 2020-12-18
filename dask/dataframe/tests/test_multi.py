@@ -1462,7 +1462,7 @@ def test_concat_one_series():
 
 def test_concat_partition_sizes_ax0():
     a = pd.DataFrame({"a": range(100), "b": range(100, 200)})
-    b = pd.DataFrame({"a": range(-1, -101, -1), "b": range(-100,-200,-1)})
+    b = pd.DataFrame({"a": range(-1, -101, -1), "b": range(-100, -200, -1)})
     aa = dd.from_pandas(a, npartitions=3, sort=False)
     bb = dd.from_pandas(b, npartitions=3, sort=False)
 
@@ -1482,7 +1482,7 @@ def test_concat_partition_sizes_ax0():
 
 def test_concat_partition_sizes_ax1():
     a = pd.DataFrame({"a": range(100), "b": range(100, 200)})
-    b = pd.DataFrame({"c": range(-1, -101, -1), "d": range(-100,-200,-1)})
+    b = pd.DataFrame({"c": range(-1, -101, -1), "d": range(-100, -200, -1)})
     aa = dd.from_pandas(a, npartitions=3)
     bb = dd.from_pandas(b, npartitions=3)
 

@@ -11,7 +11,14 @@ from ...base import tokenize
 from ... import array as da
 from ...delayed import delayed
 
-from ..core import DataFrame, Series, Index, new_dd_object, has_parallel_type, HighLevelGraph
+from ..core import (
+    DataFrame,
+    Series,
+    Index,
+    new_dd_object,
+    has_parallel_type,
+    HighLevelGraph,
+)
 from ..shuffle import set_partition
 from ..utils import insert_meta_param_description, check_meta, make_meta, is_series_like
 
@@ -493,7 +500,9 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             dsk[name, i] = (type(meta), chunk, ind, meta.columns)
 
     to_merge.extend([ensure_dict(x.dask), dsk])
-    return new_dd_object(merge(*to_merge), name, meta, divisions, partition_sizes=partition_sizes)
+    return new_dd_object(
+        merge(*to_merge), name, meta, divisions, partition_sizes=partition_sizes
+    )
 
 
 # TODO: figure out why from_dask_array (which ostensibly does the same thing) populates task dependencies differently
@@ -510,11 +519,16 @@ def series_from_dask_array(arr, index):
         aligned = arr.rechunk(chunks=(partition_sizes,))
 
         name = "array2series-%s" % tokenize(index, aligned)
+
         def make_series(index, arr):
             if not arr.size:
                 if not index.empty:
-                    raise ValueError('Empty array chunks but non-empty index chunk (%d): [%s,%s]' % (len(index), str(index[0]), str(index[-1])))
+                    raise ValueError(
+                        "Empty array chunks but non-empty index chunk (%d): [%s,%s]"
+                        % (len(index), str(index[0]), str(index[-1]))
+                    )
             return pd.Series(arr, index=index)
+
         dsk = {
             (name, idx): (
                 make_series,
@@ -524,7 +538,9 @@ def series_from_dask_array(arr, index):
             for idx in range(index.npartitions)
         }
         meta = pd.Series([], dtype=arr.dtype)
-        graph = HighLevelGraph.from_collections(name, dsk, dependencies=[index, aligned])
+        graph = HighLevelGraph.from_collections(
+            name, dsk, dependencies=[index, aligned]
+        )
         return new_dd_object(
             graph,
             name,

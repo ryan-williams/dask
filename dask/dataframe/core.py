@@ -1346,19 +1346,30 @@ Dask Name: {name}, {task} tasks"""
         if isinstance(key, Array):
             shape = key.shape
             if len(shape) != 1:
-                raise NotImplementedError("Can only slice with Arrays of rank 1 (selecting rows)")
+                raise NotImplementedError(
+                    "Can only slice with Arrays of rank 1 (selecting rows)"
+                )
             M = shape[0]
 
             if self.partition_sizes is None:
-                raise RuntimeError("%s needs to know its partition_sizes in order to slice with an Array" % (type(self)))
+                raise RuntimeError(
+                    "%s needs to know its partition_sizes in order to slice with an Array"
+                    % (type(self))
+                )
             partition_sizes = self.partition_sizes
 
             if key.dtype == np.dtype(bool):
                 if M != len(self):
-                    raise RuntimeError("Mismatched sizes: %d-row %s vs. %d-row %s" % (len(self), type(self), M, type(key)))
+                    raise RuntimeError(
+                        "Mismatched sizes: %d-row %s vs. %d-row %s"
+                        % (len(self), type(self), M, type(key))
+                    )
                 chunks = key.chunks[0]
-                if not np.all([ isinstance(dim, int) for dim in chunks ]):
-                    raise NotImplementedError("Can't index into %s with Array with unknown chunks: %s" % (type(self), str(chunks)))
+                if not np.all([isinstance(dim, int) for dim in chunks]):
+                    raise NotImplementedError(
+                        "Can't index into %s with Array with unknown chunks: %s"
+                        % (type(self), str(chunks))
+                    )
 
                 aligned_key = key.rechunk(partition_sizes)
                 akn = aligned_key._name
@@ -1374,10 +1385,16 @@ Dask Name: {name}, {task} tasks"""
                     name, dsk, dependencies=[self, aligned_key]
                 )
                 return new_dd_object(
-                    graph, name, self._meta, self.divisions, partition_sizes,
+                    graph,
+                    name,
+                    self._meta,
+                    self.divisions,
+                    partition_sizes,
                 )
             elif key.dtype == np.dtype(int):
-                raise NotImplementedError("TODO: implement slicing %s's with Arrays of ints" % type(self))
+                raise NotImplementedError(
+                    "TODO: implement slicing %s's with Arrays of ints" % type(self)
+                )
 
         raise NotImplementedError(key)
 
@@ -4204,13 +4221,18 @@ class DataFrame(_Frame):
 
             if isinstance(v, Array):
                 from .io import series_from_dask_array
+
                 kwargs[k] = series_from_dask_array(v, index=self.index)
             elif isinstance(v, np.ndarray):
                 if not self.partition_sizes:
-                    ValueError("Can't assign a numpy array to a DataFrame without knowing the latter's partition_sizes")
+                    ValueError(
+                        "Can't assign a numpy array to a DataFrame without knowing the latter's partition_sizes"
+                    )
                 from dask.array import from_array
+
                 darr = from_array(v, chunks=(self.partition_sizes,))
                 from .io import series_from_dask_array
+
                 kwargs[k] = series_from_dask_array(darr, index=self.index)
 
         pairs = list(sum(kwargs.items(), ()))
