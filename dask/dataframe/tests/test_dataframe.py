@@ -304,28 +304,6 @@ def test_repartition_sizes():
     check_partition_sizes(df3, (10,) * 10)
 
 
-# @pytest.fixture
-# def df():
-#     return pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
-#
-#
-# @pytest.fixture
-# def ddf(df):
-#     ret = dd.from_pandas(df, npartitions=3)
-#     assert ret.partition_sizes == (34, 34, 32)
-#     return ret
-
-# frames = (
-#     (ddf, df, assert_frame_equal),
-#     (ddf.i, df.i, assert_series_equal),
-# )
-#
-# @pytest.fixture(params=frames)
-# def check(request):
-#     dask, pandas, cmp = request.param
-#     return lambda fn: cmp(fn(dask).compute(), fn(pandas))
-#
-
 class Checks:
     df = pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
     ddf = dd.from_pandas(df, npartitions=3)
