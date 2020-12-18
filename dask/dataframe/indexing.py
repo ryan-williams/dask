@@ -70,7 +70,9 @@ class _iLocIndexer(_IndexerBase):
         assert iindexer == slice(None)
         meta = self._make_meta(iindexer, cindexer)
 
-        return self.obj.map_partitions(methods.iloc, cindexer, meta=meta)
+        return self.obj.map_partitions(
+            methods.iloc, cindexer, meta=meta, preserve_partition_sizes=True
+        )
 
 
 class _LocIndexer(_IndexerBase):
@@ -127,7 +129,10 @@ class _LocIndexer(_IndexerBase):
 
             meta = self._make_meta(iindexer, cindexer)
             return self.obj.map_partitions(
-                methods.try_loc, iindexer, cindexer, meta=meta
+                methods.try_loc,
+                iindexer,
+                cindexer,
+                meta=meta,  # TODO: partition_sizes
             )
 
     def _maybe_partial_time_string(self, iindexer):
@@ -142,7 +147,11 @@ class _LocIndexer(_IndexerBase):
     def _loc_series(self, iindexer, cindexer):
         meta = self._make_meta(iindexer, cindexer)
         return self.obj.map_partitions(
-            methods.loc, iindexer, cindexer, token="loc-series", meta=meta
+            methods.loc,
+            iindexer,
+            cindexer,
+            token="loc-series",
+            meta=meta,  # TODO: partition_sizes
         )
 
     def _loc_array(self, iindexer, cindexer):
@@ -189,7 +198,10 @@ class _LocIndexer(_IndexerBase):
 
         meta = self._make_meta(iindexer, cindexer)
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self.obj])
-        return new_dd_object(graph, name, meta=meta, divisions=[iindexer, iindexer])
+        # TODO: partition_sizes presumably [1], unless index values can repeat?
+        return new_dd_object(
+            graph, name, meta=meta, divisions=[iindexer, iindexer], partition_sizes=None
+        )
 
     def _get_partitions(self, keys):
         if isinstance(keys, (list, np.ndarray)):
@@ -280,6 +292,8 @@ class _LocIndexer(_IndexerBase):
 
         meta = self._make_meta(iindexer, cindexer)
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self.obj])
+        # TODO: could at least figure out partition_sizes for ":" all-rows iindexer, and non-boundary partition_sizes in
+        #  general (leaving Nones in self.partition_sizes on the ends?)
         return new_dd_object(graph, name, meta=meta, divisions=divisions)
 
 
