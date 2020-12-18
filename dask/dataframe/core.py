@@ -5700,7 +5700,7 @@ def map_partitions(
             divisions = func(
                 *[pd.Index(a.divisions) if a is dfs[0] else a for a in args], **kwargs
             )
-            if isinstance(divisions, pd.Index):
+            if isinstance(divisions, (pd.Index, np.ndarray)):
                 divisions = methods.tolist(divisions)
         except Exception:
             pass
@@ -5709,7 +5709,63 @@ def map_partitions(
                 divisions = [None] * (dfs[0].npartitions + 1)
 
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=dependencies)
-    return new_dd_object(graph, name, meta, divisions)
+    if preserve_partition_sizes:
+        from .multi import maybe_infer_partition_sizes
+
+        partition_sizes = maybe_infer_partition_sizes(divisions, dfs[0])
+
+        # Want to check whether divisions are unchanged below, ignoring changes betwwn null variants (e.g. None -> NaT)
+        from pandas import isnull
+
+        def normalize(divs):
+            return [None if isnull(d) else d for d in divs]
+
+        if normalize(divisions) == normalize(dfs[0].divisions):
+            if partition_sizes is None:
+                # If caller indicated partitions would be preserved, and divisions are not known (e.g.
+                # if the Frame is empty, and hence has divisions [None,None], but may have valid
+                # partition_sizes set), keep the original partition_sizes
+                partition_sizes = dfs[0].partition_sizes
+        else:
+            warnings.warn(
+                "\n".join(
+                    [
+                        "Expected partitions to be preserved, but partition-realignment detected:",
+                        "divisions: %s" % str(divisions),
+                        "\tBefore:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [
+                                str(getattr(arg, "divisions", None))
+                                for arg in unaligned_args
+                            ]
+                        ),
+                        "\tAfter:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [str(getattr(arg, "divisions", None)) for arg in args]
+                        ),
+                        "partition_sizes: %s" % str(partition_sizes),
+                        "\tBefore:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [
+                                str(getattr(arg, "partition_sizes", None))
+                                for arg in unaligned_args
+                            ]
+                        ),
+                        "\tAfter:",
+                        "\t\t%s"
+                        % "\n\t\t".join(
+                            [str(getattr(arg, "partition_sizes", None)) for arg in args]
+                        ),
+                    ]
+                )
+            )
+    else:
+        partition_sizes = None
+
+    return new_dd_object(graph, name, meta, divisions, partition_sizes=partition_sizes)
 
 
 def apply_and_enforce(*args, **kwargs):
@@ -5800,7 +5856,9 @@ def _rename_dask(df, names):
 
     dsk = partitionwise_graph(_rename, name, metadata, df)
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[df])
-    return new_dd_object(graph, name, metadata, df.divisions)
+    return new_dd_object(
+        graph, name, metadata, df.divisions, partition_sizes=df.partition_sizes
+    )
 
 
 def quantile(df, q, method="default"):
@@ -6365,6 +6423,36 @@ def repartition_size(df, size):
     return _repartition_from_boundaries(df, new_partitions_boundaries, new_name)
 
 
+def repartition_sizes(df, sizes):
+    if not hasattr(df, "partition_sizes"):
+        raise ValueError(
+            "Can't repartition %s based on partition_sizes, don't know existing partition sizes"
+        )
+    partition_sizes = df.partition_sizes
+    if partition_sizes == sizes:
+        return df
+
+    nxt_len = sum(sizes)
+    if partition_sizes is not None:
+        cur_len = sum(partition_sizes)
+        if cur_len != nxt_len:
+            raise ValueError(
+                "Current len doesn't match new len: %d != %d" % (cur_len, nxt_len)
+            )
+
+    new_idxs = [0] + np.cumsum(sizes).tolist()
+
+    slices = [
+        df.iloc[new_idxs[i] : new_idxs[i + 1]].repartition(npartitions=1)
+        for i in range(len(sizes))
+    ]
+    from dask.dataframe import concat
+
+    result = concat(slices)
+    result.partition_sizes = tuple(sizes)  # TODO: push this into the concat machinery
+    return result
+
+
 def total_mem_usage(df, index=True, deep=False):
     mem_usage = df.memory_usage(index=index, deep=deep)
     if is_series_like(mem_usage):
@@ -6436,9 +6524,27 @@ def _repartition_from_boundaries(df, new_partitions_boundaries, new_name):
         zip(new_partitions_boundaries, new_partitions_boundaries[1:])
     ):
         dsk[new_name, i] = (methods.concat, [(df._name, j) for j in range(start, end)])
+
+    partition_idx_starts = df.partition_idx_starts
+    if partition_idx_starts:
+        partition_idx_bounds = df.partition_idx_starts + (df._len,)
+        new_partition_idx_bounds = [
+            partition_idx_bounds[i] for i in new_partitions_boundaries
+        ]
+        partition_sizes = [
+            end - start
+            for start, end in zip(
+                new_partition_idx_bounds[:-1], new_partition_idx_bounds[1:]
+            )
+        ]
+    else:
+        partition_sizes = None
+
     divisions = [df.divisions[i] for i in new_partitions_boundaries]
     graph = HighLevelGraph.from_collections(new_name, dsk, dependencies=[df])
-    return new_dd_object(graph, new_name, df._meta, divisions)
+    return new_dd_object(
+        graph, new_name, df._meta, divisions, partition_sizes=partition_sizes
+    )
 
 
 def _split_partitions(df, nsplits, new_name):
@@ -6515,15 +6621,20 @@ def repartition(df, divisions=None, force=False):
         dsk = repartition_divisions(
             df.divisions, divisions, df._name, tmp, out, force=force
         )
+        from .multi import maybe_infer_partition_sizes
+
+        partition_sizes = maybe_infer_partition_sizes(divisions, df)
         graph = HighLevelGraph.from_collections(out, dsk, dependencies=[df])
-        return new_dd_object(graph, out, df._meta, divisions)
+        return new_dd_object(
+            graph, out, df._meta, divisions, partition_sizes=partition_sizes
+        )
     elif is_dataframe_like(df) or is_series_like(df):
         name = "repartition-dataframe-" + token
         from .utils import shard_df_on_index
 
         dfs = shard_df_on_index(df, divisions[1:-1])
         dsk = dict(((name, i), df) for i, df in enumerate(dfs))
-        return new_dd_object(dsk, name, df, divisions)
+        return new_dd_object(dsk, name, df, divisions)  # TODO: partition_sizes
     raise ValueError("Data must be DataFrame or Series")
 
 
@@ -6664,20 +6775,29 @@ def to_datetime(arg, meta=None, **kwargs):
             meta = pd.Series([pd.Timestamp("2000")])
             meta.index = meta.index.astype(arg.index.dtype)
             meta.index.name = arg.index.name
-    return map_partitions(pd.to_datetime, arg, meta=meta, **kwargs)
+    return map_partitions(
+        pd.to_datetime, arg, meta=meta, preserve_partition_sizes=True, **kwargs
+    )
 
 
 @wraps(pd.to_timedelta)
 def to_timedelta(arg, unit="ns", errors="raise"):
     meta = pd.Series([pd.Timedelta(1, unit=unit)])
-    return map_partitions(pd.to_timedelta, arg, unit=unit, errors=errors, meta=meta)
+    return map_partitions(
+        pd.to_timedelta,
+        arg,
+        unit=unit,
+        errors=errors,
+        meta=meta,
+        preserve_partition_sizes=True,
+    )
 
 
 if hasattr(pd, "isna"):
 
     @wraps(pd.isna)
     def isna(arg):
-        return map_partitions(pd.isna, arg)
+        return map_partitions(pd.isna, arg, preserve_partition_sizes=True)
 
 
 def _repr_data_series(s, index):
@@ -6726,19 +6846,22 @@ def has_parallel_type(x):
     return get_parallel_type(x) is not Scalar
 
 
-def new_dd_object(dsk, name, meta, divisions):
+def new_dd_object(dsk, name, meta, divisions, partition_sizes=None):
     """Generic constructor for dask.dataframe objects.
 
     Decides the appropriate output class based on the type of `meta` provided.
     """
     if has_parallel_type(meta):
-        return get_parallel_type(meta)(dsk, name, meta, divisions)
+        return get_parallel_type(meta)(dsk, name, meta, divisions, partition_sizes)
     elif is_arraylike(meta) and meta.shape:
         import dask.array as da
 
-        chunks = ((np.nan,) * (len(divisions) - 1),) + tuple(
-            (d,) for d in meta.shape[1:]
-        )
+        if partition_sizes:
+            chunks0 = partition_sizes
+        else:
+            chunks0 = (np.nan,) * (len(divisions) - 1)
+
+        chunks = (chunks0,) + tuple((d,) for d in meta.shape[1:])
         if len(chunks) > 1:
             layer = dsk.layers[name]
             if isinstance(layer, Blockwise):
@@ -6750,7 +6873,7 @@ def new_dd_object(dsk, name, meta, divisions):
                     layer[(name, i) + suffix] = layer.pop((name, i))
         return da.Array(dsk, name=name, chunks=chunks, dtype=meta.dtype)
     else:
-        return get_parallel_type(meta)(dsk, name, meta, divisions)
+        return get_parallel_type(meta)(dsk, name, meta, divisions, partition_sizes)
 
 
 def partitionwise_graph(func, name, *args, **kwargs):
