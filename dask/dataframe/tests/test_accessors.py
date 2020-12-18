@@ -206,15 +206,13 @@ def test_str_accessor_extractall(df_ddf):
 
 def test_str_accessor_cat(df_ddf):
     df, ddf = df_ddf
-    import numpy as np
-    with pytest.warns(np.VisibleDeprecationWarning):
-        sol = df.str_col.str.cat(df.str_col.str.upper(), sep=":")
-        assert_eq(ddf.str_col.str.cat(ddf.str_col.str.upper(), sep=":"), sol)
-        assert_eq(ddf.str_col.str.cat(df.str_col.str.upper(), sep=":"), sol)
-        assert_eq(
-            ddf.str_col.str.cat([ddf.str_col.str.upper(), df.str_col.str.lower()], sep=":"),
-            df.str_col.str.cat([df.str_col.str.upper(), df.str_col.str.lower()], sep=":"),
-        )
+    sol = df.str_col.str.cat(df.str_col.str.upper(), sep=":")
+    assert_eq(ddf.str_col.str.cat(ddf.str_col.str.upper(), sep=":"), sol)
+    assert_eq(ddf.str_col.str.cat(df.str_col.str.upper(), sep=":"), sol)
+    assert_eq(
+        ddf.str_col.str.cat([ddf.str_col.str.upper(), df.str_col.str.lower()], sep=":"),
+        df.str_col.str.cat([df.str_col.str.upper(), df.str_col.str.lower()], sep=":"),
+    )
 
     for o in ["foo", ["foo"]]:
         with pytest.raises(TypeError):

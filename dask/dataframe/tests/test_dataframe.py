@@ -304,37 +304,11 @@ def test_repartition_sizes():
     check_partition_sizes(df3, (10,) * 10)
 
 
-# @pytest.fixture
-# def df():
-#     return pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
-#
-#
-# @pytest.fixture
-# def ddf(df):
-#     ret = dd.from_pandas(df, npartitions=3)
-#     assert ret.partition_sizes == (34, 34, 32)
-#     return ret
-
-# frames = (
-#     (ddf, df, assert_frame_equal),
-#     (ddf.i, df.i, assert_series_equal),
-# )
-#
-# @pytest.fixture(params=frames)
-# def check(request):
-#     dask, pandas, cmp = request.param
-#     return lambda fn: cmp(fn(dask).compute(), fn(pandas))
-#
-
-class Checks:
+class IlocChecks:
     df = pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)])
     ddf = dd.from_pandas(df, npartitions=3)
 
-    # def __init__(self, dask, pandas, cmp, seed=123):
     def __init__(self, seed=123):
-        # self.dask = dask
-        # self.pandas = pandas
-        # self.cmp = cmp
         np.random.seed(seed)
 
     def check(self, fn, pandas_fn=None):
@@ -405,7 +379,7 @@ class Checks:
 
         check = Check()
 
-        check[:100] # (lambda df: df[:100])
+        check[:100]
         check[:]
         check[0:100]
 
@@ -488,12 +462,6 @@ class Checks:
         check_arr_slice((10,)*10)
         check_arr_slice((1,)*100)
 
-    # def test_ranges(self):
-    #     def check(range):
-    #         self.check(lambda df: df.iloc[range])
-    #
-    #     check(range(10))
-
     def test_ints(self):
         #assert_frame_equal(self.df.iloc[range(10)], self.df.iloc[:10])
         self.check(lambda df: df.iloc[range(  1)])
@@ -513,14 +481,16 @@ class Checks:
     # check(lambda df: df.iloc[34])
     # check(lambda df: df.iloc[-1])
 
-class DataFrameIloc(TestCase, Checks):
-    dask = Checks.ddf
-    pandas = Checks.df
+
+class DataFrameIloc(TestCase, IlocChecks):
+    dask = IlocChecks.ddf
+    pandas = IlocChecks.df
     def cmp(self, l, r): assert_frame_equal(l, r)
 
-class SeriesIloc(TestCase, Checks):
-    dask = Checks.ddf.i
-    pandas = Checks.df.i
+
+class SeriesIloc(TestCase, IlocChecks):
+    dask = IlocChecks.ddf.i
+    pandas = IlocChecks.df.i
     def cmp(self, l, r): assert_series_equal(l, r)
 
 
@@ -1125,7 +1095,7 @@ def test_where_mask():
         (ddf5, pdf6, pdf5, pdf6),
     ]
 
-    for idx, (ddf, ddcond, pdf, pdcond) in enumerate(cases):
+    for ddf, ddcond, pdf, pdcond in cases:
         assert isinstance(ddf, dd.DataFrame)
         assert isinstance(ddcond, (dd.DataFrame, pd.DataFrame))
         assert isinstance(pdf, pd.DataFrame)

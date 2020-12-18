@@ -1,8 +1,0 @@
-ARG dask_version=2.16.0
-FROM runsascoded/dask-test:"$dask_version"
-
-RUN pip install papermill ipykernel jupyter
-RUN python -m ipykernel install --user --name 3.8.2
-ADD sum-test-matrix-crash.ipynb sum-test-sparse-crash.ipynb ./
-ADD sum-crash.sh ./
-ENTRYPOINT ["./sum-crash.sh"]
