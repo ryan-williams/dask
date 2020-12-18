@@ -4621,7 +4621,8 @@ def test_scipy_sparse_sum(fmt, axis, keepdims):
     spmat_sum = spmat.sum(axis=axis)
     if axis == 0:
         pytest.xfail(
-            "TODO: default to keepdims=True behavior at the dask level when _meta is spmatrix and first dimension is being summed over"
+            "TODO: default to keepdims=True behavior at the dask level when _meta is spmatrix and first dimension is "
+            "being summed over"
         )
     else:
         assert_almost_equal(dask_sum, spmat_sum)

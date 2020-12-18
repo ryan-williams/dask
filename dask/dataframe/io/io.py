@@ -514,7 +514,7 @@ def series_from_dask_array(arr, index):
     partition_sizes = index.partition_sizes
     if partition_sizes:
         if len(index) != arr.size:
-            raise ValueError("Sizes don't match: %d != %d" % (len(self), v.size))
+            raise ValueError("Sizes don't match: %d != %d" % (len(index), arr.size))
 
         aligned = arr.rechunk(chunks=(partition_sizes,))
 

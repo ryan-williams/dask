@@ -161,7 +161,8 @@ class _iLocIndexer(_IndexerBase):
                             stop += _len
                         else:
                             if stop < -1 and step < 0:
-                                # these will both end up empty if step is positive, otherwise this partitions the non-negative indices from the negatives
+                                # these will both end up empty if step is positive, otherwise this partitions the
+                                # non-negative indices from the negatives
                                 positives = obj.iloc[range(start, -1, step)]
                                 first_negative_idx = start % abs(step) + step
                                 negatives = obj.iloc[

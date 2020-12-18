@@ -1,7 +1,6 @@
 import warnings
 from itertools import product
 from operator import add
-import unittest
 from unittest import TestCase
 
 import pytest
@@ -376,7 +375,7 @@ class Checks:
                     try:
                         check(idx, args)
                         idx += 1
-                    except AssertionError as e:
+                    except AssertionError:
                         self.assertTrue(False)
 
     def test_slices(self):
