@@ -1195,6 +1195,24 @@ Dask Name: {name}, {task} tasks"""
 
         return _LocIndexer(self)
 
+    @property
+    def iloc(self):
+        """Purely integer-location based indexing for selection by position.
+
+        Only indexing the column positions is supported. Trying to select
+        row positions will raise a ValueError.
+
+        See :ref:`dataframe.indexing` for more.
+
+        Examples
+        --------
+        >>> df.iloc[:, [2, 0, 1]]  # doctest: +SKIP
+        """
+        from .indexing import _iLocIndexer
+
+        # For dataframes with unique column names, this will be transformed into a __getitem__ call
+        return _iLocIndexer(self)
+
     def _partitions(self, index):
         if not isinstance(index, tuple):
             index = (index,)
