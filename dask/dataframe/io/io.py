@@ -215,7 +215,9 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
     name = name or ("from_pandas-" + tokenize(data, chunksize))
 
     if not nrows:
-        return new_dd_object({(name, 0): data}, name, data, [None, None])
+        return new_dd_object(
+            {(name, 0): data}, name, data, divisions=[None, None], partition_sizes=[0]
+        )
 
     if sort and not data.index.is_monotonic_increasing:
         data = data.sort_index(ascending=True)
@@ -227,11 +229,13 @@ def from_pandas(data, npartitions=None, chunksize=None, sort=True, name=None):
         locations = list(range(0, nrows, chunksize)) + [len(data)]
         divisions = [None] * len(locations)
 
+    partition_bounds = list(zip(locations[:-1], locations[1:]))
+    partition_sizes = tuple(stop - start for start, stop in partition_bounds)
     dsk = {
         (name, i): data.iloc[start:stop]
-        for i, (start, stop) in enumerate(zip(locations[:-1], locations[1:]))
+        for i, (start, stop) in enumerate(partition_bounds)
     }
-    return new_dd_object(dsk, name, data, divisions)
+    return new_dd_object(dsk, name, data, divisions, partition_sizes)
 
 
 def from_bcolz(x, chunksize=None, categorize=True, index=None, lock=lock, **kwargs):
@@ -456,6 +460,11 @@ def from_dask_array(x, columns=None, index=None, meta=None):
     if index is not None:
         if not isinstance(index, Index):
             raise ValueError("'index' must be an instance of dask.dataframe.Index")
+        partition_sizes = index.partition_sizes
+        if partition_sizes:
+            chunks = x.chunks[0]
+            if partition_sizes != chunks:
+                x = x.rechunk({0: partition_sizes})
         if index.npartitions != x.numblocks[0]:
             msg = (
                 "The index and array have different numbers of blocks. "
@@ -463,12 +472,14 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             )
             raise ValueError(msg)
         divisions = index.divisions
+        partition_sizes = index.partition_sizes
         to_merge.append(ensure_dict(index.dask))
         index = index.__dask_keys__()
 
     elif np.isnan(sum(x.shape)):
         divisions = [None] * (len(x.chunks[0]) + 1)
         index = [None] * len(x.chunks[0])
+        partition_sizes = None
     else:
         divisions = [0]
         for c in x.chunks[0]:
@@ -477,6 +488,7 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             (np.arange, a, b, 1, "i8") for a, b in zip(divisions[:-1], divisions[1:])
         ]
         divisions[-1] -= 1
+        partition_sizes = tuple(x.chunks[0])
 
     dsk = {}
     for i, (chunk, ind) in enumerate(zip(x.__dask_keys__(), index)):
@@ -550,7 +562,7 @@ def to_records(df):
     dask.dataframe._Frame.values
     dask.dataframe.from_dask_array
     """
-    return df.map_partitions(M.to_records)
+    return df.map_partitions(M.to_records)  # TODO: partition_sizes
 
 
 @insert_meta_param_description
