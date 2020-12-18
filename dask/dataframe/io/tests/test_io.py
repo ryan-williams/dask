@@ -375,7 +375,9 @@ def test_from_dask_array_index(as_frame):
     if as_frame:
         s = s.to_frame()
     result = dd.from_dask_array(s.values, index=s.index)
-    assert_eq(s, result)
+    assert_eq(
+        s, result, check_partition_sizes=False
+    )  # TODO: from_dask-array partition_sizes
 
 
 def test_from_dask_array_index_raises():
@@ -386,6 +388,9 @@ def test_from_dask_array_index_raises():
 
     a = dd.from_pandas(pd.Series(range(12)), npartitions=2)
     b = dd.from_pandas(pd.Series(range(12)), npartitions=4)
+    c = dd.from_dask_array(a.values, index=b.index)
+    assert c.values.compute().tolist() == list(range(12))
+    b.partition_sizes = None
     with pytest.raises(ValueError) as m:
         dd.from_dask_array(a.values, index=b.index)
 
