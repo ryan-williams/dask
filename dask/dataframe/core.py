@@ -1262,8 +1262,6 @@ Dask Name: {name}, {task} tasks"""
         """
         return IndexCallable(self._partitions)
 
-    # Note: iloc is implemented only on DataFrame
-
     def __getitem__(self, key):
         name = "getitem-%s" % tokenize(self, key)
         if np.isscalar(key) or isinstance(key, (tuple, str)):
@@ -4013,24 +4011,6 @@ class DataFrame(_Frame):
         self._meta = renamed._meta
         self._name = renamed._name
         self.dask = renamed.dask
-
-    @property
-    def iloc(self):
-        """Purely integer-location based indexing for selection by position.
-
-        Only indexing the column positions is supported. Trying to select
-        row positions will raise a ValueError.
-
-        See :ref:`dataframe.indexing` for more.
-
-        Examples
-        --------
-        >>> df.iloc[:, [2, 0, 1]]  # doctest: +SKIP
-        """
-        from .indexing import _iLocIndexer
-
-        # For dataframes with unique column names, this will be transformed into a __getitem__ call
-        return _iLocIndexer(self)
 
     def __len__(self):
         _len = getattr(self, "_len", None)
