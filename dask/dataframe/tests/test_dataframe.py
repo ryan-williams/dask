@@ -1069,7 +1069,7 @@ def test_metadata_inference_single_partition_aligned_args():
         assert len(df) > 0
         return df
 
-    res = dd.map_partitions(check, ddf, ddf.x)
+    res = dd.map_partitions(check, ddf, ddf.x, preserve_partition_sizes=True)
     assert_eq(res, ddf)
 
 
@@ -1269,9 +1269,10 @@ def test_shape():
     assert_eq(dd.compute(result)[0], (len(full.a),))
 
     sh = dd.from_pandas(pd.DataFrame(index=[1, 2, 3]), npartitions=2).shape
-    assert (sh[0].compute(), sh[1]) == (3, 0)
-    sh = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1).shape
-    assert (sh[0].compute(), sh[1]) == (0, 2)
+    assert sh == (3, 0)
+    ddf = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1)
+    sh = ddf.shape
+    assert sh == (0, 2)
 
 
 def test_nbytes():
@@ -1464,15 +1465,20 @@ def test_assign():
         index=pd.Index(list("abcdefgh")),
     )
     ddf = dd.from_pandas(df, npartitions=3)
+    assert ddf.known_divisions
     ddf_unknown = dd.from_pandas(df, npartitions=3, sort=False)
     assert not ddf_unknown.known_divisions
 
+    h = np.array(range(len(df)))
+    i = da.from_array(h)
     res = ddf.assign(
         c=1,
         d="string",
         e=ddf.a.sum(),
         f=ddf.a + ddf.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i,
         dt=pd.Timestamp(2018, 2, 13),
     )
     res_unknown = ddf_unknown.assign(
@@ -1481,6 +1487,8 @@ def test_assign():
         e=ddf_unknown.a.sum(),
         f=ddf_unknown.a + ddf_unknown.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i,
         dt=pd.Timestamp(2018, 2, 13),
     )
     sol = df.assign(
@@ -1489,6 +1497,8 @@ def test_assign():
         e=df.a.sum(),
         f=df.a + df.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i.compute(),
         dt=pd.Timestamp(2018, 2, 13),
     )
     assert_eq(res, sol)
@@ -1839,7 +1849,7 @@ def test_repartition():
             [compute_as_if_collection(dd.DataFrame, d.dask, k) for k in keys]
         )
         assert_eq(orig, sp)
-        assert_eq(orig, d)
+        assert_eq(orig, d, check_partition_sizes=False)
 
     df = pd.DataFrame(
         {"x": [1, 2, 3, 4, 5, 6], "y": list("abdabd")}, index=[10, 20, 30, 40, 50, 60]
@@ -1848,7 +1858,7 @@ def test_repartition():
 
     b = a.repartition(divisions=[10, 20, 50, 60])
     assert b.divisions == (10, 20, 50, 60)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
     assert_eq(compute_as_if_collection(dd.DataFrame, b.dask, (b._name, 0)), df.iloc[:1])
 
     for div in [
@@ -1988,8 +1998,13 @@ def test_repartition_npartitions(use_index, n, k, dtype, transform):
     )
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
-    b = a.repartition(k)
-    assert_eq(a, b)
+    check_partition_sizes(a)
+    b = a.repartition(npartitions=k)
+    if k > n:
+        check_partition_sizes(b, None)
+    else:
+        check_partition_sizes(b)
+    assert_eq(a, b, check_partition_sizes=False)
     assert b.npartitions == k
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -2007,7 +2022,7 @@ def test_repartition_partition_size(use_index, n, partition_size, transform):
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
     b = a.repartition(partition_size=partition_size)
-    assert_eq(a, b, check_divisions=False)
+    assert_eq(a, b, check_divisions=False, check_partition_sizes=False)
     assert np.alltrue(b.map_partitions(total_mem_usage, deep=True).compute() <= 1024)
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -2044,7 +2059,7 @@ def test_repartition_npartitions_numeric_edge_case():
     a = dd.from_pandas(df, npartitions=15)
     assert a.npartitions == 15
     b = a.repartition(npartitions=11)
-    assert_eq(a, b)
+    assert_eq(a, b, check_partition_sizes=False)
 
 
 def test_repartition_object_index():
@@ -2714,7 +2729,7 @@ def test_to_dask_array_raises(as_frame):
     if as_frame:
         a = a.to_frame()
 
-    with pytest.raises(ValueError, match="4 != 2"):
+    with pytest.raises(ValueError, match="6 != 10"):
         a.to_dask_array((1, 2, 3, 4))
 
     with pytest.raises(ValueError, match="Unexpected value"):
@@ -2731,17 +2746,12 @@ def test_to_dask_array_unknown(as_frame):
 
     result = a.to_dask_array()
     assert isinstance(result, da.Array)
-    result = result.chunks
+    chunks = result.chunks
 
     if as_frame:
-        assert len(result) == 2
-        assert result[1] == (1,)
+        assert chunks == ((2, 3), (1,))
     else:
-        assert len(result) == 1
-
-    result = result[0]
-    assert len(result) == 2
-    assert all(np.isnan(x) for x in result)
+        assert chunks == ((2, 3),)
 
 
 @pytest.mark.parametrize(
@@ -3121,23 +3131,23 @@ def test_reset_index():
 
     sol = df.reset_index()
     res = ddf.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.reset_index(drop=True)
     res = ddf.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.x.reset_index()
     res = ddf.x.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
     sol = df.x.reset_index(drop=True)
     res = ddf.x.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert_eq(res, sol)
 
 
 def test_dataframe_compute_forward_kwargs():
@@ -3459,6 +3469,11 @@ def test_array_assignment():
 
     arr = np.array(np.random.normal(size=50))
     darr = da.from_array(arr, chunks=10)
+    ddf["z"] = darr
+    np.testing.assert_array_equal(ddf.z.values.compute(), darr.compute())
+
+    # If we don't know the partition_sizes, assigning an Array w/ a different number of partitions raises
+    ddf.partition_sizes = None
     msg = "Number of partitions do not match"
     with pytest.raises(ValueError, match=msg):
         ddf["z"] = darr
@@ -4188,11 +4203,22 @@ def test_mixed_dask_array_operations():
     df = pd.DataFrame({"x": [1, 2, 3]}, index=[4, 5, 6])
     ddf = dd.from_pandas(df, npartitions=2)
 
-    assert_eq(df.x + df.x.values, ddf.x + ddf.x.values)
-    assert_eq(df.x.values + df.x, ddf.x.values + ddf.x)
+    x = ddf.x
+    v = x.values
+    chunks = v.chunks
+    assert chunks == ((3,),)
+
+    l = df.x + df.x.values
+    r = x + v
+    assert_eq(l, r)
+    l = df.x.values + df.x
+    r = v + x
+    assert_eq(l, r)
 
     assert_eq(df.x + df.index.values, ddf.x + ddf.index.values)
-    assert_eq(df.index.values + df.x, ddf.index.values + ddf.x)
+    l = df.index.values + df.x
+    r = ddf.index.values + ddf.x
+    assert_eq(l, r)
 
     assert_eq(df.x + df.x.values.sum(), ddf.x + ddf.x.values.sum())
 

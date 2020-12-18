@@ -787,6 +787,7 @@ def assert_eq(
     check_dtypes=True,
     check_divisions=True,
     check_index=True,
+    check_partition_sizes=True,
     **kwargs,
 ):
     if check_divisions:
@@ -796,6 +797,17 @@ def assert_eq(
             at = type(np.asarray(a.divisions).tolist()[0])  # numpy to python
             bt = type(np.asarray(b.divisions).tolist()[0])  # scalar conversion
             assert at == bt, (at, bt)
+    if check_partition_sizes:
+        assert_partition_sizes(a)
+        assert_partition_sizes(b)
+        if hasattr(a, "partition_sizes") and hasattr(b, "partition_sizes"):
+            assert a.partition_sizes == b.partition_sizes, (
+                a.partition_sizes,
+                b.partition_sizes,
+            )
+            # at = type(np.asarray(a.partition_sizes).tolist()[0])  # numpy to python
+            # bt = type(np.asarray(b.partition_sizes).tolist()[0])  # scalar conversion
+            # assert at == bt, (at, bt)
     assert_sane_keynames(a)
     assert_sane_keynames(b)
     a = _check_dask(a, check_names=check_names, check_dtypes=check_dtypes)
@@ -865,6 +877,17 @@ def assert_divisions(ddf):
     if len(results[-1]):
         assert index(results[-1]).min() >= ddf.divisions[-2]
         assert index(results[-1]).max() <= ddf.divisions[-1]
+
+
+def assert_partition_sizes(ddf):
+    if not hasattr(ddf, "partition_sizes") or ddf.partition_sizes is None:
+        return
+    results = get_sync(ddf.dask, ddf.__dask_keys__())
+    partition_sizes = tuple(len(df) for df in results)
+    assert ddf.partition_sizes == partition_sizes, (
+        ddf.partition_sizes,
+        partition_sizes,
+    )
 
 
 def assert_sane_keynames(ddf):
