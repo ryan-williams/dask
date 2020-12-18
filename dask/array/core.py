@@ -2072,6 +2072,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __add__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.add, self, other)
 
     @check_if_handled_given_other
@@ -2080,6 +2084,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __and__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.and_, self, other)
 
     @check_if_handled_given_other
@@ -2088,6 +2096,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __div__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.div, self, other)
 
     @check_if_handled_given_other
@@ -2127,6 +2139,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __mod__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mod, self, other)
 
     @check_if_handled_given_other
@@ -2135,6 +2151,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __mul__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.mul, self, other)
 
     @check_if_handled_given_other
@@ -2150,17 +2170,25 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __or__(self, other):
-        return elemwise(operator.or_, self, other)
+        from ..dataframe import DataFrame, Series
 
-    def __pos__(self):
-        return self
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
+        return elemwise(operator.or_, self, other)
 
     @check_if_handled_given_other
     def __ror__(self, other):
         return elemwise(operator.or_, other, self)
 
+    def __pos__(self):
+        return self
+
     @check_if_handled_given_other
     def __pow__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.pow, self, other)
 
     @check_if_handled_given_other
@@ -2177,6 +2205,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __sub__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.sub, self, other)
 
     @check_if_handled_given_other
@@ -2185,6 +2217,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __truediv__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.truediv, self, other)
 
     @check_if_handled_given_other
@@ -2193,6 +2229,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __floordiv__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.floordiv, self, other)
 
     @check_if_handled_given_other
@@ -2201,6 +2241,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __xor__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         return elemwise(operator.xor, self, other)
 
     @check_if_handled_given_other
@@ -2209,6 +2253,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __matmul__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .routines import matmul
 
         return matmul(self, other)
@@ -2221,6 +2269,10 @@ class Array(DaskMethodsMixin):
 
     @check_if_handled_given_other
     def __divmod__(self, other):
+        from ..dataframe import DataFrame, Series
+
+        if isinstance(other, (DataFrame, Series)):
+            return NotImplemented
         from .ufunc import divmod
 
         return divmod(self, other)
