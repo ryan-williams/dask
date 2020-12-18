@@ -279,7 +279,7 @@ def merge_indexed_dataframes(lhs, rhs, left_index=True, right_index=True, **kwar
     if how == 'left':
         partition_sizes = lhs.partition_sizes
     elif how == 'right':
-        partition_sizes = lhs.partition_sizes
+        partition_sizes = rhs.partition_sizes
     divisions, parts = require(divisions, parts, required[how])
 
     name = "join-indexed-" + tokenize(lhs, rhs, **kwargs)
