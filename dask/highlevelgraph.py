@@ -15,18 +15,17 @@ def compute_layer_dependencies(layers):
     """Returns the dependencies between layers"""
 
     def _find_layer_containing_key(key):
-        _layers = [ k for k, v in layers.items() if key in v ]
+        _layers = [k for k, v in layers.items() if key in v]
         if len(_layers) == 1:
             return _layers[0]
         elif len(_layers) > 1:
             # TODO: should this raise an Exception? Some tests hit this code path; debug.
-            msg = "Found task key %s in multiple layers: %s" % (key, ','.join(_layers))
-            #raise RuntimeError(msg)
-            stderr.write('%s\n' % msg)
+            msg = "Found task key %s in multiple layers: %s" % (key, ",".join(_layers))
+            # raise RuntimeError(msg)
+            stderr.write("%s\n" % msg)
             return _layers[0]
         else:
             raise RuntimeError(f"{repr(key)} not found")
-
 
     all_keys = set(key for layer in layers.values() for key in layer)
     ret = {}
@@ -34,10 +33,7 @@ def compute_layer_dependencies(layers):
         non_layer_keys = all_keys.difference(v.keys())
         layer_tasks = v.values()
         task_keys = keys_in_tasks(non_layer_keys, layer_tasks)
-        _layers = set(
-            _find_layer_containing_key(key)
-            for key in task_keys
-        )
+        _layers = set(_find_layer_containing_key(key) for key in task_keys)
         ret[k] = _layers
     return ret
 

@@ -3293,7 +3293,7 @@ def test_A_property():
 
 @pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
 def test_A_property_matrix():
-    x = da.ones((5,5), chunks=(2,2))
+    x = da.ones((5, 5), chunks=(2, 2))
     assert x.A is x
 
     from numpy import array, float64, matrix, ndarray
@@ -3301,36 +3301,38 @@ def test_A_property_matrix():
     y = x.map_blocks(matrix)
     assert type(y._meta) is matrix
     from numpy.testing import assert_array_equal
-    assert_array_equal(y._meta, matrix([], dtype=float64).reshape(0,0))
+
+    assert_array_equal(y._meta, matrix([], dtype=float64).reshape(0, 0))
 
     A = y.A
     assert A is not y
     assert_eq(A.compute(), y.compute())
     assert type(A._meta) is ndarray
-    assert_array_equal(A._meta, array([], dtype=float64).reshape((0,0)))
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0, 0)))
 
 
-@pytest.mark.parametrize("spmatrix", ['csr','csc','coo'])
+@pytest.mark.parametrize("spmatrix", ["csr", "csc", "coo"])
 @pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
 def test_A_property_spmatrix(spmatrix):
     pytest.importorskip("scipy.sparse")
 
-    x = da.ones((5,5), chunks=(2,2))
+    x = da.ones((5, 5), chunks=(2, 2))
     assert x.A is x
 
     from numpy import array, float64, ndarray
 
     from scipy.sparse import csr_matrix, csc_matrix, coo_matrix
+
     mat_map = {
-        'csr': csr_matrix,
-        'csc': csc_matrix,
-        'coo': coo_matrix,
+        "csr": csr_matrix,
+        "csc": csc_matrix,
+        "coo": coo_matrix,
     }
     mat = mat_map[spmatrix]
 
     y = x.map_blocks(mat)
     assert type(y._meta) is mat
-    empty = mat([], dtype=float64).reshape(0,0)
+    empty = mat([], dtype=float64).reshape(0, 0)
     assert (y._meta != empty).nnz == 0
 
     A = y.A
@@ -3339,8 +3341,8 @@ def test_A_property_spmatrix(spmatrix):
     assert type(A._meta) is ndarray
 
     from numpy.testing import assert_array_equal
-    assert_array_equal(A._meta, array([], dtype=float64).reshape((0,0)))
 
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0, 0)))
 
 
 def test_copy_mutate():
@@ -4224,6 +4226,7 @@ def test_dask_array_holds_numpy_matrix_containers():
 
     assert isinstance(yy, np.matrix)
     from numpy.testing import assert_array_equal
+
     assert_array_equal(yy, xx)
 
     z = x.T.map_blocks(np.matrix)
@@ -4256,7 +4259,9 @@ def test_dask_array_holds_scipy_sparse_containers():
     assert (zz == xx.T).all()
 
 
-@pytest.mark.parametrize("axis,stack,spmatrix", [(0, 'vstack', 'csr'), (1, 'hstack', 'coo')])
+@pytest.mark.parametrize(
+    "axis,stack,spmatrix", [(0, "vstack", "csr"), (1, "hstack", "coo")]
+)
 def test_scipy_sparse_concatenate(axis, stack, spmatrix):
     pytest.importorskip("scipy.sparse")
     import scipy.sparse
@@ -4274,14 +4279,14 @@ def test_scipy_sparse_concatenate(axis, stack, spmatrix):
     z = da.concatenate(ys, axis=axis)
     zz = z.compute()
 
-    if spmatrix == 'coo':
+    if spmatrix == "coo":
         spmatrix = scipy.sparse.coo_matrix
     else:
         spmatrix = scipy.sparse.csr_matrix
 
     assert isinstance(zz, spmatrix)
 
-    if stack == 'vstack':
+    if stack == "vstack":
         sp_concatenate = scipy.sparse.vstack
     else:
         sp_concatenate = scipy.sparse.hstack
@@ -4555,32 +4560,55 @@ def test_rechunk_auto():
     assert y.npartitions == 1
 
 
-@pytest.mark.parametrize("fmt", ['csr','csc','coo',])
-@pytest.mark.parametrize("axis", [0, 1, None,])
-@pytest.mark.parametrize("keepdims", [None, False, True,])
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        "csr",
+        "csc",
+        "coo",
+    ],
+)
+@pytest.mark.parametrize(
+    "axis",
+    [
+        0,
+        1,
+        None,
+    ],
+)
+@pytest.mark.parametrize(
+    "keepdims",
+    [
+        None,
+        False,
+        True,
+    ],
+)
 def test_scipy_sparse_sum(fmt, axis, keepdims):
     pytest.importorskip("scipy.sparse")
     from scipy.sparse import coo_matrix, csc_matrix, csr_matrix, random
 
     fmt_map = {
-        'coo': coo_matrix,
-        'csc': csc_matrix,
-        'csr': csr_matrix,
+        "coo": coo_matrix,
+        "csc": csc_matrix,
+        "csr": csr_matrix,
     }
     fmt_cls = fmt_map[fmt]
 
     M, N = 100, 100
-    m, n =  20,  10
-    if fmt == 'coo':
-        spmat = random(M, N, format='csr')
-        x = da.from_array(spmat, chunks=(m,n), asarray=False).map_blocks(coo_matrix)
+    m, n = 20, 10
+    if fmt == "coo":
+        spmat = random(M, N, format="csr")
+        x = da.from_array(spmat, chunks=(m, n), asarray=False).map_blocks(coo_matrix)
     else:
         spmat = random(M, N, format=fmt)
         assert isinstance(spmat, fmt_cls)
-        x = da.from_array(spmat, chunks=(m,n), asarray=False)
+        x = da.from_array(spmat, chunks=(m, n), asarray=False)
 
-    block_typenames = x.map_blocks(lambda c: np.array([[type(c).__name__]]), dtype=object).compute()
-    expected = np.full(((M+m-1)//m, (N+n-1)//n), '%s_matrix' % fmt)
+    block_typenames = x.map_blocks(
+        lambda c: np.array([[type(c).__name__]]), dtype=object
+    ).compute()
+    expected = np.full(((M + m - 1) // m, (N + n - 1) // n), "%s_matrix" % fmt)
     assert_eq(block_typenames, expected)
 
     xx = x.compute()
@@ -4592,6 +4620,9 @@ def test_scipy_sparse_sum(fmt, axis, keepdims):
     dask_sum = x.sum(axis=axis).compute()
     spmat_sum = spmat.sum(axis=axis)
     if axis == 0:
-        pytest.xfail("TODO: default to keepdims=True behavior at the dask level when _meta is spmatrix and first dimension is being summed over")
+        pytest.xfail(
+            "TODO: default to keepdims=True behavior at the dask level when _meta is spmatrix and first dimension is "
+            "being summed over"
+        )
     else:
         assert_almost_equal(dask_sum, spmat_sum)

@@ -290,6 +290,7 @@ def partial_reduce(
     # operations like `sum`, and so effectively have keepdims=True when axis=0 or axis=1.
     try:
         import numpy as np
+
         if isinstance(reduced_meta, np.matrix) and len(split_every) == 1:
             keepdims = True
     except ImportError:
@@ -297,6 +298,7 @@ def partial_reduce(
 
     try:
         from scipy.sparse import spmatrix
+
         if isinstance(reduced_meta, spmatrix) and len(split_every) == 1:
             keepdims = True
     except ImportError:

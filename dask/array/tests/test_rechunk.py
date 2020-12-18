@@ -535,8 +535,8 @@ def test_rechunk_unknown_from_array():
     dd = pytest.importorskip("dask.dataframe")
     x = dd.from_array(da.ones(shape=(4, 4), chunks=(2, 2))).values
     result = x.rechunk((None, 4))
-    assert x.chunks == ((2,2),(4,))
-    assert result.chunks == ((2,2),(4,))
+    assert x.chunks == ((2, 2), (4,))
+    assert result.chunks == ((2, 2), (4,))
     assert_eq(x, result)
 
 

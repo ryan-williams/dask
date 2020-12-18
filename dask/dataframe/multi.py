@@ -275,6 +275,11 @@ def merge_indexed_dataframes(lhs, rhs, left_index=True, right_index=True, **kwar
     kwargs["right_index"] = right_index
 
     (lhs, rhs), divisions, parts = align_partitions(lhs, rhs)
+    partition_sizes = None
+    if how == "left":
+        partition_sizes = lhs.partition_sizes
+    elif how == "right":
+        partition_sizes = rhs.partition_sizes
     divisions, parts = require(divisions, parts, required[how])
 
     name = "join-indexed-" + tokenize(lhs, rhs, **kwargs)
@@ -287,7 +292,7 @@ def merge_indexed_dataframes(lhs, rhs, left_index=True, right_index=True, **kwar
         dsk[(name, i)] = (apply, merge_chunk, [a, b], kwargs)
 
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[lhs, rhs])
-    return new_dd_object(graph, name, meta, divisions)
+    return new_dd_object(graph, name, meta, divisions, partition_sizes=partition_sizes)
 
 
 shuffle_func = shuffle  # name sometimes conflicts with keyword argument
@@ -1018,7 +1023,14 @@ def stack_partitions(dfs, divisions, join="outer", **kwargs):
                 dsk[(name, i)] = (methods.concat, [empty, key], 0, join)
             i += 1
 
-    return new_dd_object(dsk, name, meta, divisions)
+    # TODO(partition-sizes): is it ever worth keeping some partitions non-None while others are None?
+    partition_sizes = (
+        [partition_size for df in dfs for partition_size in df.partition_sizes]
+        if all(df.partition_sizes for df in dfs) and join == "outer"
+        else None
+    )
+
+    return new_dd_object(dsk, name, meta, divisions, partition_sizes=partition_sizes)
 
 
 def concat(

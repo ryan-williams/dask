@@ -378,10 +378,10 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
     @property
     def partition_idx_ranges(self):
         if self.partition_sizes:
-            partition_ends = np.cumsum(self.partition_sizes).tolist()
+            partition_ends = [0] + np.cumsum(self.partition_sizes).tolist()
             return zip(
-                [0] + partition_ends[:-1],
                 partition_ends,
+                partition_ends[1:],
             )
         else:
             return None
@@ -1252,7 +1252,151 @@ Dask Name: {name}, {task} tasks"""
         """
         return IndexCallable(self._partitions)
 
-    # Note: iloc is implemented only on DataFrame
+    def __getitem__(self, key):
+        name = "getitem-%s" % tokenize(self, key)
+        if np.isscalar(key) or isinstance(key, (tuple, str)):
+
+            if isinstance(self._meta.index, (pd.DatetimeIndex, pd.PeriodIndex)):
+                if key not in self._meta.columns:
+                    return self.loc[key]
+
+            # error is raised from pandas
+            meta = self._meta[_extract_meta(key)]
+            dsk = partitionwise_graph(operator.getitem, name, self, key)
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
+            return new_dd_object(
+                graph, name, meta, self.divisions, self.partition_sizes
+            )
+
+        elif isinstance(key, slice):
+            from pandas.api.types import is_float_dtype
+
+            is_integer_slice = any(
+                isinstance(i, Integral) for i in (key.start, key.step, key.stop)
+            )
+            # Slicing with integer labels is always iloc based except for a
+            # float indexer for some reason
+            if is_integer_slice and not is_float_dtype(self.index.dtype):
+                # NOTE: this always fails currently, as iloc is mostly
+                # unsupported, but we call it anyway here for future-proofing
+                # and error-attribution purposes
+                return self.iloc[key]
+            else:
+                return self.loc[key]
+
+        if isinstance(key, (np.ndarray, list)) or (
+            not is_dask_collection(key) and (is_series_like(key) or is_index_like(key))
+        ):
+            # error is raised from pandas
+            meta = self._meta[_extract_meta(key)]
+
+            dsk = partitionwise_graph(operator.getitem, name, self, key)
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
+
+            if self.partition_sizes:
+                if isinstance(key, list):
+                    key = np.array(key)
+
+                dtype = key.dtype
+                if dtype == np.dtype("bool"):
+                    partition_ends = np.cumsum(self.partition_sizes)
+                    assert len(key) == partition_ends[-1]
+                    partition_starts = [0] + list(partition_ends[:-1])
+                    partition_sizes = []
+                    partition_keys = []
+                    for start, end in zip(partition_starts, partition_ends):
+                        keys = key[start:end]
+                        partition_keys.append(keys)
+                        size = np.sum(keys)
+                        partition_sizes.append(size)
+
+                    dsk = {
+                        (name, i): (
+                            operator.getitem,
+                            (self._name, i),
+                            partition_keys[i],
+                        )
+                        for i in range(self.npartitions)
+                    }
+                    graph = HighLevelGraph.from_collections(
+                        name, dsk, dependencies=[self]
+                    )
+                    return new_dd_object(
+                        graph, name, meta, self.divisions, partition_sizes
+                    )
+
+            return new_dd_object(
+                graph, name, meta, self.divisions, self.partition_sizes
+            )
+
+        if isinstance(key, Series):
+            # do not perform dummy calculation, as columns will not be changed.
+            #
+            if self.divisions != key.divisions:
+                from .multi import _maybe_align_partitions
+
+                self, key = _maybe_align_partitions([self, key])
+            dsk = partitionwise_graph(operator.getitem, name, self, key)
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self, key])
+            return new_dd_object(graph, name, self, self.divisions)
+
+        if isinstance(key, DataFrame):
+            return self.where(key, np.nan)
+
+        if isinstance(key, Array):
+            shape = key.shape
+            if len(shape) != 1:
+                raise NotImplementedError(
+                    "Can only slice with Arrays of rank 1 (selecting rows)"
+                )
+            M = shape[0]
+
+            if self.partition_sizes is None:
+                raise RuntimeError(
+                    "%s needs to know its partition_sizes in order to slice with an Array"
+                    % (type(self))
+                )
+            partition_sizes = self.partition_sizes
+
+            if key.dtype == np.dtype(bool):
+                if M != len(self):
+                    raise RuntimeError(
+                        "Mismatched sizes: %d-row %s vs. %d-row %s"
+                        % (len(self), type(self), M, type(key))
+                    )
+                chunks = key.chunks[0]
+                if not np.all([isinstance(dim, int) for dim in chunks]):
+                    raise NotImplementedError(
+                        "Can't index into %s with Array with unknown chunks: %s"
+                        % (type(self), str(chunks))
+                    )
+
+                aligned_key = key.rechunk(partition_sizes)
+                akn = aligned_key._name
+                dsk = {
+                    (name, i): (
+                        operator.getitem,
+                        (self._name, i),
+                        (akn, i),
+                    )
+                    for i in range(self.npartitions)
+                }
+                graph = HighLevelGraph.from_collections(
+                    name, dsk, dependencies=[self, aligned_key]
+                )
+                return new_dd_object(
+                    graph,
+                    name,
+                    self._meta,
+                    self.divisions,
+                    partition_sizes,
+                )
+            elif key.dtype == np.dtype(int):
+                raise NotImplementedError(
+                    "TODO: implement slicing %s's with Arrays of ints" % type(self)
+                )
+
+        raise NotImplementedError(key)
 
     def repartition(
         self,
@@ -3160,15 +3304,6 @@ Dask Name: {name}, {task} tasks""".format(
 
         return partition_quantiles(self, npartitions, upsample=upsample)
 
-    def __getitem__(self, key):
-        if isinstance(key, Series):
-            return map_partitions(operator.getitem, self, key, meta=self._meta)
-
-        raise NotImplementedError(
-            "Series getitem in only supported for other series objects "
-            "with matching partition structure"
-        )
-
     @derived_from(pd.DataFrame)
     def _get_numeric_data(self, how="any", subset=None):
         return self
@@ -3817,88 +3952,6 @@ class DataFrame(_Frame):
             "`len(df.index) == 0` or `len(df.columns) == 0`"
         )
 
-    def __getitem__(self, key):
-        name = "getitem-%s" % tokenize(self, key)
-        if np.isscalar(key) or isinstance(key, (tuple, str)):
-
-            if isinstance(self._meta.index, (pd.DatetimeIndex, pd.PeriodIndex)):
-                if key not in self._meta.columns:
-                    return self.loc[key]
-
-            # error is raised from pandas
-            meta = self._meta[_extract_meta(key)]
-            dsk = partitionwise_graph(operator.getitem, name, self, key)
-            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-            return new_dd_object(
-                graph, name, meta, self.divisions, self.partition_sizes
-            )
-
-        elif isinstance(key, slice):
-            from pandas.api.types import is_float_dtype
-
-            is_integer_slice = any(
-                isinstance(i, Integral) for i in (key.start, key.step, key.stop)
-            )
-            # Slicing with integer labels is always iloc based except for a
-            # float indexer for some reason
-            if is_integer_slice and not is_float_dtype(self.index.dtype):
-                # NOTE: this always fails currently, as iloc is mostly
-                # unsupported, but we call it anyway here for future-proofing
-                # and error-attribution purposes
-                return self.iloc[key]
-            else:
-                return self.loc[key]
-
-        if isinstance(key, (np.ndarray, list)) or (
-            not is_dask_collection(key) and (is_series_like(key) or is_index_like(key))
-        ):
-            # error is raised from pandas
-            meta = self._meta[_extract_meta(key)]
-
-            dsk = partitionwise_graph(operator.getitem, name, self, key)
-            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-
-            if self.partition_sizes:
-                if isinstance(key, list):
-                    key = np.array(key)
-
-                dtype = key.dtype
-                if dtype == np.dtype("bool"):
-                    partition_ends = np.cumsum(self.partition_sizes)
-                    assert len(key) == partition_ends[-1]
-                    partition_starts = [0] + list(partition_ends[:-1])
-                    partition_sizes = []
-                    partition_keys = []
-                    for start, end in zip(partition_starts, partition_ends):
-                        keys = key[start:end]
-                        partition_keys.append(keys)
-                        size = np.sum(keys)
-                        partition_sizes.append(size)
-
-                    dsk = {
-                        (name, i): (
-                            operator.getitem,
-                            (self._name, i),
-                            partition_keys[i],
-                        )
-                        for i in range(self.npartitions)
-                    }
-                    graph = HighLevelGraph.from_collections(
-                        name, dsk, dependencies=[self]
-                    )
-                    return new_dd_object(
-                        graph, name, meta, self.divisions, partition_sizes
-                    )
-
-            return new_dd_object(
-                graph, name, meta, self.divisions, self.partition_sizes
-            )
-
-        if isinstance(key, Series):
-            return map_partitions(operator.getitem, self, key, meta=self._meta)
-
-        raise NotImplementedError(key)
-
     def __setitem__(self, key, value):
         if isinstance(key, (tuple, list)) and isinstance(value, DataFrame):
             df = self.assign(**{k: value[c] for k, c in zip(key, value.columns)})
@@ -4168,13 +4221,18 @@ class DataFrame(_Frame):
 
             if isinstance(v, Array):
                 from .io import series_from_dask_array
+
                 kwargs[k] = series_from_dask_array(v, index=self.index)
             elif isinstance(v, np.ndarray):
                 if not self.partition_sizes:
-                    ValueError("Can't assign a numpy array to a DataFrame without knowing the latter's partition_sizes")
+                    ValueError(
+                        "Can't assign a numpy array to a DataFrame without knowing the latter's partition_sizes"
+                    )
                 from dask.array import from_array
+
                 darr = from_array(v, chunks=(self.partition_sizes,))
                 from .io import series_from_dask_array
+
                 kwargs[k] = series_from_dask_array(darr, index=self.index)
 
         pairs = list(sum(kwargs.items(), ()))
