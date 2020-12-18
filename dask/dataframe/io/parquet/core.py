@@ -1,6 +1,8 @@
 from distutils.version import LooseVersion
 import math
 
+import numpy as np
+import pandas as pd
 import tlz as toolz
 import warnings
 from ....bytes import core  # noqa
@@ -42,7 +44,17 @@ class ParquetSubgraph(Layer):
     """
 
     def __init__(
-        self, name, engine, fs, meta, columns, index, parts, kwargs, part_ids=None
+        self,
+        name,
+        engine,
+        fs,
+        meta,
+        columns,
+        index,
+        parts,
+        kwargs,
+        part_ids=None,
+        partition_offsets=None,
     ):
         self.name = name
         self.engine = engine
@@ -53,6 +65,7 @@ class ParquetSubgraph(Layer):
         self.parts = parts
         self.kwargs = kwargs
         self.part_ids = list(range(len(parts))) if part_ids is None else part_ids
+        self.partition_offsets = partition_offsets
 
     def __repr__(self):
         return "ParquetSubgraph<name='{}', n_parts={}, columns={}>".format(
@@ -76,6 +89,14 @@ class ParquetSubgraph(Layer):
         if not isinstance(part, list):
             part = [part]
 
+        if self.partition_offsets:
+            partition_offset = (
+                self.partition_offsets[i],
+                self.partition_offsets[i + 1],
+            )
+        else:
+            partition_offset = None
+
         return (
             read_parquet_part,
             self.fs,
@@ -84,6 +105,7 @@ class ParquetSubgraph(Layer):
             [p["piece"] for p in part],
             self.columns,
             self.index,
+            partition_offset,
             toolz.merge(part[0]["kwargs"], self.kwargs or {}),
         )
 
@@ -123,7 +145,7 @@ class BlockwiseParquet(BlockwiseIO):
     """
 
     def __init__(
-        self, name, engine, fs, meta, columns, index, parts, kwargs, part_ids=None
+        self, name, engine, fs, meta, columns, index, parts, kwargs, part_ids=None, partition_offsets=None,
     ):
         self.name = name
         self.engine = engine
@@ -134,6 +156,7 @@ class BlockwiseParquet(BlockwiseIO):
         self.parts = parts
         self.kwargs = kwargs
         self.part_ids = list(range(len(parts))) if part_ids is None else part_ids
+        self.partition_offsets = partition_offsets
 
         self.io_name = "blockwise-io-" + name
         dsk_io = ParquetSubgraph(
@@ -146,6 +169,7 @@ class BlockwiseParquet(BlockwiseIO):
             self.parts,
             self.kwargs,
             part_ids=self.part_ids,
+            partition_offsets=self.partition_offsets,
         )
 
         super().__init__(
@@ -345,7 +369,7 @@ def read_parquet(
     )
 
     # Parse dataset statistics from metadata (if available)
-    parts, divisions, index, index_in_columns = process_statistics(
+    parts, divisions, index, index_in_columns, partition_sizes = process_statistics(
         parts, statistics, filters, index, chunksize
     )
 
@@ -357,7 +381,21 @@ def read_parquet(
     if meta.index.name == NONE_LABEL:
         meta.index.name = None
 
-    subgraph = BlockwiseParquet(name, engine, fs, meta, columns, index, parts, kwargs)
+    if partition_sizes:
+        partition_offsets = (0,) + tuple(np.cumsum(partition_sizes))
+    else:
+        partition_offsets = None
+    subgraph = BlockwiseParquet(
+        name,
+        engine,
+        fs,
+        meta,
+        columns,
+        index,
+        parts,
+        kwargs,
+        partition_offsets=partition_offsets,
+    )
 
     # Set the index that was previously treated as a column
     if index_in_columns:
@@ -369,11 +407,12 @@ def read_parquet(
         # empty dataframe - just use meta
         subgraph = {(name, 0): meta}
         divisions = (None, None)
+        partition_sizes = (0,)
 
-    return new_dd_object(subgraph, name, meta, divisions)
+    return new_dd_object(subgraph, name, meta, divisions, partition_sizes)
 
 
-def read_parquet_part(fs, func, meta, part, columns, index, kwargs):
+def read_parquet_part(fs, func, meta, part, columns, index, partition_offset, kwargs):
     """Read a part of a parquet dataset
 
     This function is used by `read_parquet`."""
@@ -383,6 +422,11 @@ def read_parquet_part(fs, func, meta, part, columns, index, kwargs):
         df = concat(dfs, axis=0)
     else:
         df = func(fs, part, columns, index, **kwargs)
+
+    if partition_offset:
+        partition_start, partition_end = partition_offset
+        if isinstance(df.index, pd.RangeIndex):
+            df = df.set_index(pd.RangeIndex(partition_start, partition_end))
 
     if meta.columns.name:
         df.columns.name = meta.columns.name
@@ -1014,6 +1058,7 @@ def process_statistics(parts, statistics, filters, index, chunksize):
 
         out = sorted_columns(statistics)
 
+        partition_sizes = tuple(part["num-rows"] for part in statistics)
         if index and isinstance(index, str):
             index = [index]
         if index and out:
@@ -1051,12 +1096,22 @@ def process_statistics(parts, statistics, filters, index, chunksize):
                 )
                 index = False
                 divisions = [None] * (len(parts) + 1)
+        elif index is False:
+            # default RangeIndex
+            if partition_sizes:
+                partition_starts = np.cumsum(partition_sizes)
+                divisions = (
+                    (0,) + tuple(partition_starts[:-1]) + (partition_starts[-1] - 1,)
+                )
+            else:
+                divisions = (0,)
         else:
             divisions = [None] * (len(parts) + 1)
     else:
         divisions = [None] * (len(parts) + 1)
+        partition_sizes = None
 
-    return parts, divisions, index, index_in_columns
+    return parts, divisions, index, index_in_columns, partition_sizes
 
 
 def set_index_columns(meta, index, columns, index_in_columns, auto_index_allowed):
