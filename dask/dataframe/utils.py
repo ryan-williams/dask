@@ -805,9 +805,6 @@ def assert_eq(
                 a.partition_sizes,
                 b.partition_sizes,
             )
-            # at = type(np.asarray(a.partition_sizes).tolist()[0])  # numpy to python
-            # bt = type(np.asarray(b.partition_sizes).tolist()[0])  # scalar conversion
-            # assert at == bt, (at, bt)
     assert_sane_keynames(a)
     assert_sane_keynames(b)
     a = _check_dask(a, check_names=check_names, check_dtypes=check_dtypes)
