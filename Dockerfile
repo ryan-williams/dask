@@ -1,7 +1,7 @@
 # Test+Install Dask
 
 ## Upstream scipy image
-ARG BASE=celsiustx/base
+ARG BASE=celsiustx/scipy:dc07698a66d6729b3264af795c282d874e3f5a17
 FROM $BASE
 
 WORKDIR /opt/src
@@ -16,9 +16,8 @@ ARG REF=origin/ctx
 RUN git checkout $REF
 
 # Install
-RUN apt-get update && apt-get install -y graphviz
-RUN pip install scipy \
- && pip install -e .[complete]
+RUN apt-get install -y graphviz
+RUN pip install -e .[complete]
 
 # Test
 RUN pip install pytest
