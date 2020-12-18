@@ -12,7 +12,7 @@ from ... import array as da
 from ...dataframe.core import new_dd_object
 from ...delayed import delayed
 
-from ..core import DataFrame, Series, Index, new_dd_object, has_parallel_type
+from ..core import DataFrame, Series, Index, new_dd_object, has_parallel_type, HighLevelGraph
 from ..shuffle import set_partition
 from ..utils import insert_meta_param_description, check_meta, make_meta, is_series_like
 
@@ -500,7 +500,53 @@ def from_dask_array(x, columns=None, index=None, meta=None):
             dsk[name, i] = (type(meta), chunk, ind, meta.columns)
 
     to_merge.extend([ensure_dict(x.dask), dsk])
-    return new_dd_object(merge(*to_merge), name, meta, divisions)
+    return new_dd_object(merge(*to_merge), name, meta, divisions, partition_sizes=partition_sizes)
+
+
+# TODO: figure out why from_dask_array (which ostensibly does the same thing) populates task dependencies differently
+# resulting in _check_dask → graph.validate() failing in tests
+def series_from_dask_array(arr, index):
+    if len(arr.shape) > 1:
+        raise ValueError("Array assignment only supports 1-D arrays")
+
+    partition_sizes = index.partition_sizes
+    if partition_sizes:
+        if len(index) != arr.size:
+            raise ValueError("Sizes don't match: %d != %d" % (len(self), v.size))
+
+        aligned = arr.rechunk(chunks=(partition_sizes,))
+
+        name = "array2series-%s" % tokenize(index, aligned)
+        def make_series(index, arr):
+            if not arr.size:
+                if not index.empty:
+                    raise ValueError('Empty array chunks but non-empty index chunk (%d): [%s,%s]' % (len(index), str(index[0]), str(index[-1])))
+            return pd.Series(arr, index=index)
+        dsk = {
+            (name, idx): (
+                make_series,
+                (index._name, idx),
+                (aligned._name, idx),
+            )
+            for idx in range(index.npartitions)
+        }
+        meta = pd.Series([], dtype=arr.dtype)
+        graph = HighLevelGraph.from_collections(name, dsk, dependencies=[index, aligned])
+        return new_dd_object(
+            graph,
+            name,
+            meta=meta,
+            divisions=index.divisions,
+            partition_sizes=partition_sizes,
+        )
+    elif arr.npartitions != index.npartitions:
+        raise ValueError(
+            "Number of partitions do not match ({0} != {1})".format(
+                arr.npartitions, index.npartitions
+            )
+        )
+    else:
+        return from_dask_array(arr, index=index)
 
 
 def _link(token, result):

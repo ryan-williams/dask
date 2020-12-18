@@ -7,6 +7,7 @@ from .io import (
     from_dask_array,
     from_delayed,
     dataframe_from_ctable,
+    series_from_dask_array,
     to_bag,
     to_records,
 )
