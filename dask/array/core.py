@@ -4085,10 +4085,10 @@ def elemwise(op, *args, **kwargs):
     blockwise
     """
     out = kwargs.pop("out", None)
-    if not set(["name", "dtype"]).issuperset(kwargs):
+    if not {"name", "dtype"}.issuperset(kwargs):
         msg = "%s does not take the following keyword arguments %s"
         raise TypeError(
-            msg % (op.__name__, str(sorted(set(kwargs) - set(["name", "dtype"]))))
+            msg % (op.__name__, str(sorted(set(kwargs) - {"name", "dtype"})))
         )
 
     args = [np.asarray(a) if isinstance(a, (list, tuple)) else a for a in args]
@@ -4120,9 +4120,11 @@ def elemwise(op, *args, **kwargs):
         # them just like other arrays, and if necessary cast the result of op
         # to match.
         vals = [
-            np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
-            if not is_scalar_for_elemwise(a)
-            else a
+            (
+                a
+                if is_scalar_for_elemwise(a)
+                else np.empty((1,) * max(1, a.ndim), dtype=a.dtype)
+            )
             for a in args
         ]
         try:
