@@ -949,12 +949,10 @@ def check_index(ind, dimension):
         return
     elif ind is None:
         return
-
     elif ind >= dimension:
         raise IndexError(
             "Index is not smaller than dimension %d >= %d" % (ind, dimension)
         )
-
     elif ind < -dimension:
         msg = "Negative index is not greater than negative dimension %d <= -%d"
         raise IndexError(msg % (ind, dimension))
