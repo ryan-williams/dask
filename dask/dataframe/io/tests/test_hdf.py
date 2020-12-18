@@ -1,4 +1,3 @@
-from distutils.version import LooseVersion
 import numpy as np
 import pandas as pd
 import pytest
@@ -413,7 +412,7 @@ def test_to_hdf_lock_delays():
     )
     a = dd.from_pandas(df16, 16)
 
-    # adding artifichial delays to make sure last tasks finish first
+    # adding artificial delays to make sure last tasks finish first
     # that's a way to simulate last tasks finishing last
     def delayed_nop(i):
         if i[1] < 10:
@@ -428,7 +427,7 @@ def test_to_hdf_lock_delays():
         assert_eq(df16, out)
 
     # saving to multiple hdf files
-    # adding artifichial delays to make sure last tasks finish first
+    # adding artificial delays to make sure last tasks finish first
     with tmpdir() as dn:
         fn = os.path.join(dn, "data*")
         a = a.apply(delayed_nop, axis=1, meta=a)
@@ -847,9 +846,6 @@ def test_hdf_path_exceptions():
         dd.read_hdf([], "/tmp")
 
 
-@pytest.mark.skipif(
-    pd.__version__ < LooseVersion("0.24.2"), reason="HDF key behaviour changed"
-)
 def test_hdf_nonpandas_keys():
     # https://github.com/dask/dask/issues/5934
     # TODO: maybe remove this if/when pandas copes with all keys

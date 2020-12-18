@@ -286,13 +286,8 @@ def test_tokenize_pandas_no_pickle():
     tokenize(df)
 
 
-@pytest.mark.skipif("not pd")
+@pytest.mark.skipif("not dd")
 def test_tokenize_pandas_extension_array():
-    from dask.dataframe._compat import PANDAS_GT_100, PANDAS_GT_0240
-
-    if not PANDAS_GT_0240:
-        pytest.skip("requires pandas>=1.0.0")
-
     arrays = [
         pd.array([1, 0, None], dtype="Int64"),
         pd.array(["2000"], dtype="Period[D]"),
@@ -305,7 +300,7 @@ def test_tokenize_pandas_extension_array():
         ),
     ]
 
-    if PANDAS_GT_100:
+    if dd._compat.PANDAS_GT_100:
         arrays.extend(
             [
                 pd.array(["a", "b", None], dtype="string"),
@@ -677,8 +672,8 @@ def test_compute_dataframe():
     ddf1 = ddf.a + 1
     ddf2 = ddf.a + ddf.b
     out1, out2 = compute(ddf1, ddf2)
-    pd.testing.assert_series_equal(out1, df.a + 1)
-    pd.testing.assert_series_equal(out2, df.a + df.b)
+    dd._compat.tm.assert_series_equal(out1, df.a + 1)
+    dd._compat.tm.assert_series_equal(out2, df.a + df.b)
 
 
 @pytest.mark.skipif("not dd or not da")

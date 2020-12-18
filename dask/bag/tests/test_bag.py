@@ -61,6 +61,20 @@ def test_keys():
     assert b.__dask_keys__() == sorted(dsk.keys())
 
 
+def test_bag_groupby_pure_hash():
+    # https://github.com/dask/dask/issues/6640
+    result = b.groupby(iseven).compute()
+    assert result == [(False, [1, 3] * 3), (True, [0, 2, 4] * 3)]
+
+
+def test_bag_groupby_normal_hash():
+    # https://github.com/dask/dask/issues/6640
+    result = b.groupby(lambda x: "even" if iseven(x) else "odd").compute()
+    assert len(result) == 2
+    assert ("odd", [1, 3] * 3) in result
+    assert ("even", [0, 2, 4] * 3) in result
+
+
 def test_bag_map():
     b = db.from_sequence(range(100), npartitions=10)
     b2 = db.from_sequence(range(100, 200), npartitions=10)
@@ -676,6 +690,7 @@ def test_read_text_large_gzip():
         assert "".join(c.compute()) == data.decode()
 
 
+@pytest.mark.xfail(reason="https://github.com/dask/dask/issues/6914")
 @pytest.mark.slow
 @pytest.mark.network
 def test_from_s3():
@@ -716,6 +731,7 @@ def test_from_long_sequence():
 
 
 def test_from_empty_sequence():
+    pytest.importorskip("dask.dataframe")
     b = db.from_sequence([])
     assert b.npartitions == 1
     df = b.to_dataframe(meta={"a": "int"}).compute()

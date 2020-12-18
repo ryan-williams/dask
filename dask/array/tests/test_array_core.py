@@ -7,7 +7,6 @@ np = pytest.importorskip("numpy")
 import os
 import time
 from io import StringIO
-from distutils.version import LooseVersion
 import operator
 from operator import add, sub, getitem
 from threading import Lock
@@ -300,10 +299,6 @@ def test_Array_computation():
     assert float(a[0, 0]) == 1
 
 
-@pytest.mark.skipif(
-    LooseVersion(np.__version__) < "1.14.0",
-    reason="NumPy doesn't have `np.linalg._umath_linalg` yet",
-)
 def test_Array_numpy_gufunc_call__array_ufunc__01():
     x = da.random.normal(size=(3, 10, 10), chunks=(2, 10, 10))
     nx = x.compute()
@@ -313,10 +308,6 @@ def test_Array_numpy_gufunc_call__array_ufunc__01():
     assert_eq(ny, vy)
 
 
-@pytest.mark.skipif(
-    LooseVersion(np.__version__) < "1.14.0",
-    reason="NumPy doesn't have `np.linalg._umath_linalg` yet",
-)
 def test_Array_numpy_gufunc_call__array_ufunc__02():
     x = da.random.normal(size=(3, 10, 10), chunks=(2, 10, 10))
     nx = x.compute()
@@ -1541,9 +1532,7 @@ def test_map_blocks_dtype_inference():
     with pytest.raises(ValueError) as e:
         dx.map_blocks(foo)
     msg = str(e.value)
-    assert msg.startswith("`dtype` inference failed")
-    assert "Please specify the dtype explicitly" in msg
-    assert "RuntimeError" in msg
+    assert "dtype" in msg
 
 
 def test_map_blocks_infer_newaxis():
@@ -1572,7 +1561,7 @@ def test_map_blocks_optimize_blockwise(func):
     dsk = c.__dask_graph__()
     optimized = optimize_blockwise(dsk)
     # The two additions and the map_blocks should be fused together
-    assert len(optimized.layers) == len(dsk.layers) - 2
+    assert len(optimized.layers) == len(dsk.layers) - 6
 
 
 def test_repr():
@@ -1617,6 +1606,12 @@ def test_slicing_flexible_type():
     b = da.from_array(a, 2)
 
     assert_eq(a[:, 0], b[:, 0])
+
+
+def test_slicing_with_object_dtype():
+    # https://github.com/dask/dask/issues/6892
+    d = da.from_array(np.array(["a", "b"], dtype=np.object), chunks=(1,))
+    assert d.dtype == d[(0,)].dtype
 
 
 def test_dtype():
@@ -4595,3 +4590,29 @@ def test_scipy_sparse_sum(fmt, axis, keepdims):
         pytest.xfail("TODO: default to keepdims=True behavior at the dask level when _meta is spmatrix and first dimension is being summed over")
     else:
         assert_almost_equal(dask_sum, spmat_sum)
+
+
+def test_map_blocks_series():
+    pd = pytest.importorskip("pandas")
+    import dask.dataframe as dd
+    from dask.dataframe.utils import assert_eq as dd_assert_eq
+
+    x = da.ones(10, chunks=(5,))
+    s = x.map_blocks(pd.Series)
+    assert isinstance(s, dd.Series)
+    assert s.npartitions == x.npartitions
+
+    dd_assert_eq(s, s)
+
+
+@pytest.mark.xfail(reason="need to remove singleton index dimension")
+def test_map_blocks_dataframe():
+    pd = pytest.importorskip("pandas")
+    import dask.dataframe as dd
+    from dask.dataframe.utils import assert_eq as dd_assert_eq
+
+    x = da.ones((10, 2), chunks=(5, 2))
+    s = x.map_blocks(pd.DataFrame)
+    assert isinstance(s, dd.DataFrame)
+    assert s.npartitions == x.npartitions
+    dd_assert_eq(s, s)

@@ -1,11 +1,22 @@
+import abc
 import collections.abc
 from sys import stderr
-from typing import Hashable, Optional, Set, Mapping, Iterable, Tuple
+from typing import (
+    Any,
+    Dict,
+    Hashable,
+    Optional,
+    Set,
+    Mapping,
+    Iterable,
+    Tuple,
+)
 import copy
 
 import tlz as toolz
 
-from .utils import ignoring
+from . import config
+from .utils import ignoring, stringify
 from .base import is_dask_collection
 from .core import reverse_dict, keys_in_tasks
 from .utils_test import add, inc  # noqa: F401
@@ -46,12 +57,98 @@ class Layer(collections.abc.Mapping):
     """High level graph layer
 
     This abstract class establish a protocol for high level graph layers.
+
+    The main motivation of a layer is to represent a collection of tasks
+    symbolically in order to speedup a series of operations significantly.
+    Ideally, a layer should stay in this symbolic state until execution
+    but in practice some operations will force the layer to generate all
+    its internal tasks. We say that the layer has been materialized.
+
+    Most of the default implementations in this class will materialize the
+    layer. It is up to derived classes to implement non-materializing
+    implementations.
     """
+
+    def __init__(self, annotations=None):
+        if annotations:
+            self.annotations = annotations
+        else:
+            self.annotations = copy.copy(config.get("annotations", None))
+
+    @abc.abstractmethod
+    def is_materialized(self) -> bool:
+        """Return whether the layer is materialized or not"""
+        return True
+
+    def get_output_keys(self) -> Set:
+        """Return a set of all output keys
+
+        Output keys are all keys in the layer that might be referenced by
+        other layers.
+
+        Classes overriding this implementation should not cause the layer
+        to be materialized.
+
+        Returns
+        -------
+        keys: Set
+            All output keys
+        """
+        return self.keys()
+
+    def pack_annotations(self) -> Mapping[str, Any]:
+        """Packs Layer annotations for transmission to scheduler
+
+        Callables annotations are fully expanded over Layer keys, while
+        other values are simply transmitted as is
+
+        Returns
+        -------
+        packed_annotations : dict
+            Packed annotations.
+        """
+        if self.annotations is None:
+            return None
+
+        packed = {}
+
+        for a, v in self.annotations.items():
+            if callable(v):
+                packed[a] = {stringify(k): v(k) for k in self}
+                packed[a]["__expanded_annotations__"] = True
+            else:
+                packed[a] = v
+
+        return packed
+
+    @staticmethod
+    def expand_annotations(annotations, keys) -> Mapping[str, Any]:
+        if annotations is None:
+            return None
+
+        expanded = {}
+        keys_stringified = False
+
+        for a, v in annotations.items():
+            if type(v) is dict and "__expanded_annotations__" in v:
+                # Maybe do a destructive update for efficiency?
+                v = v.copy()
+                del v["__expanded_annotations__"]
+                expanded[a] = v
+            else:
+                if not keys_stringified:
+                    keys = [stringify(k) for k in keys]
+                    keys_stringified = True
+
+                expanded[a] = {k: v for k in keys}
+
+        return expanded
 
     def cull(
         self, keys: Set, all_hlg_keys: Iterable
     ) -> Tuple["Layer", Mapping[Hashable, Set]]:
-        """Return a new Layer with only the tasks required to calculate `keys`.
+        """Return a new Layer with only the tasks required to calculate `keys` and
+        a map of external key dependencies.
 
         In other words, remove unnecessary tasks from the layer.
 
@@ -65,11 +162,16 @@ class Layer(collections.abc.Mapping):
         -------
         layer: Layer
             Culled layer
+        deps: Map
+            Map of external key dependencies
         """
-        deps = self.get_dependencies(all_hlg_keys)
 
         if len(keys) == len(self):
-            return self, deps  # Nothing to cull if preserving all existing keys
+            # Nothing to cull if preserving all existing keys
+            return (
+                self,
+                {k: self.get_dependencies(k, all_hlg_keys) for k in self.keys()},
+            )
 
         ret_deps = {}
         seen = set()
@@ -78,8 +180,8 @@ class Layer(collections.abc.Mapping):
         while work:
             k = work.pop()
             out[k] = self[k]
-            ret_deps[k] = deps[k]
-            for d in deps[k]:
+            ret_deps[k] = self.get_dependencies(k, all_hlg_keys)
+            for d in ret_deps[k]:
                 if d not in seen:
                     if d in self:
                         seen.add(d)
@@ -87,40 +189,119 @@ class Layer(collections.abc.Mapping):
 
         return BasicLayer(out), ret_deps
 
-    def get_dependencies(self, all_hlg_keys: Iterable) -> Mapping[Hashable, Set]:
-        """Get dependencies of all keys in the layer
+    def get_dependencies(self, key: Hashable, all_hlg_keys: Iterable) -> Set:
+        """Get dependencies of `key` in the layer
 
         Parameters
         ----------
-        all_hlg_keys : Iterable
+        key: Hashable
+            The key to find dependencies of
+        all_hlg_keys: Iterable
             All keys in the high level graph.
 
         Returns
         -------
-        map: Mapping
-            A map that maps each key in the layer to its dependencies
+        deps: set
+            A set of dependencies
         """
-        return {k: keys_in_tasks(all_hlg_keys, [v]) for k, v in self.items()}
+        return keys_in_tasks(all_hlg_keys, [self[key]])
+
+    def __dask_distributed_pack__(self, client) -> Optional[Any]:
+        """Pack the layer for scheduler communication in Distributed
+
+        This method should pack its current state and is called by the Client when
+        communicating with the Scheduler.
+        The Scheduler will then use .__dask_distributed_unpack__(data, ...) to unpack
+        the state, materialize the layer, and merge it into the global task graph.
+
+        The returned state must be compatible with Distributed's scheduler, which
+        means it must obey the following:
+          - Serializable by msgpack (notice, msgpack converts lists to tuples)
+          - All remote data must be unpacked (see unpack_remotedata())
+          - All keys must be converted to strings now or when unpacking
+          - All tasks must be serialized (see dumps_task())
+
+        Alternatively, the method can return None, which will make Distributed
+        materialize the layer and use a default packing method.
+
+        Parameters
+        ----------
+        client: distributed.Client
+            The client calling this function.
+
+        Returns
+        -------
+        state: Object serializable by msgpack
+            Scheduler compatible state of the layer or None
+        """
+        return None
+
+    @classmethod
+    def __dask_distributed_unpack__(
+        cls,
+        state: Any,
+        dsk: Dict[str, Any],
+        dependencies: Mapping[Hashable, Set],
+        annotations: Dict[str, Any],
+    ) -> None:
+        """Unpack the state of a layer previously packed by __dask_distributed_pack__()
+
+        This method is called by the scheduler in Distributed in order to unpack
+        the state of a layer and merge it into its global task graph. The method
+        should update `dsk` and `dependencies`, which are the already materialized
+        state of the preceding layers in the high level graph. The layers of the
+        high level graph are unpacked in topological order.
+
+        See Layer.__dask_distributed_pack__() for packing detail.
+
+        Parameters
+        ----------
+        state: Any
+            The state returned by Layer.__dask_distributed_pack__()
+        dsk: dict
+            The materialized low level graph of the already unpacked layers
+        dependencies: Mapping
+            The dependencies of each key in `dsk`
+        annotations: dict
+            The materialized task annotations
+        """
+        raise NotImplementedError(
+            f"{type(cls)} doesn't implement __dask_distributed_unpack__()"
+        )
+
+    def __reduce__(self):
+        """Default serialization implementation, which materializes the Layer
+
+        This should follow the standard pickle protocol[1] but must always return
+        a tuple and the arguments for the callable object must be compatible with
+        msgpack. This is because Distributed uses msgpack to send Layers to the
+        scheduler.
+
+        [1] <https://docs.python.org/3/library/pickle.html#object.__reduce__>
+        """
+        return (BasicLayer, (dict(self),))
+
+    def __copy__(self):
+        """Default shallow copy implementation"""
+        obj = type(self).__new__(self.__class__)
+        obj.__dict__.update(self.__dict__)
+        return obj
 
 
 class BasicLayer(Layer):
     """Basic implementation of `Layer`
 
+    Fully materialized layer implemented by a mapping
+
     Parameters
     ----------
-    mapping : Mapping
+    mapping: Mapping
         The mapping between keys and tasks, typically a dask graph.
-    dependencies : Mapping[Hashable, Set], optional
-        Mapping between keys and their dependencies
-    global_dependencies: Set, optional
-        Set of dependencies that all keys in the layer depend on. Notice,
-        the set might also contain literals that will be ignored.
     """
 
-    def __init__(self, mapping, dependencies=None, global_dependencies=None):
+    def __init__(self, mapping: Mapping, annotations=None):
+        super().__init__(annotations=annotations)
         self.mapping = mapping
-        self.dependencies = dependencies
-        self.global_dependencies = global_dependencies
 
     def __contains__(self, k):
         return k in self.mapping
@@ -134,15 +315,8 @@ class BasicLayer(Layer):
     def __len__(self):
         return len(self.mapping)
 
-    def get_dependencies(self, all_hlg_keys):
-        if self.dependencies is None or self.global_dependencies is None:
-            return super().get_dependencies(all_hlg_keys)
-
-        global_deps = self.global_dependencies.intersection(all_hlg_keys)
-        ret = self.dependencies.copy()
-        for v in ret.values():
-            v |= global_deps
-        return ret
+    def is_materialized(self):
+        return True
 
 
 class HighLevelGraph(Mapping):
@@ -162,14 +336,16 @@ class HighLevelGraph(Mapping):
 
     Parameters
     ----------
-    layers : Dict[str, Mapping]
+    layers : Mapping[str, Mapping]
         The subgraph layers, keyed by a unique name
-    dependencies : Dict[str, Set[str]]
+    dependencies : Mapping[str, Set[str]]
         The set of layers on which each layer depends
+    key_dependencies : Mapping[Hashable, Set], optional
+        Mapping (some) keys in the high level graph to their dependencies. If
+        a key is missing, its dependencies will be calculated on-the-fly.
 
     Examples
     --------
-
     Here is an idealized example that shows the internal state of a
     HighLevelGraph
 
@@ -211,30 +387,21 @@ class HighLevelGraph(Mapping):
 
     def __init__(
         self,
-        layers: Mapping[str, Mapping],
+        layers: Mapping[str, Layer],
         dependencies: Mapping[str, Set],
         key_dependencies: Optional[Mapping[Hashable, Set]] = None,
     ):
-        self.__keys = None
+        self._keys = None
+        self._all_external_keys = None
         self.layers = layers
         self.dependencies = dependencies
-        self.key_dependencies = key_dependencies
+        self.key_dependencies = key_dependencies if key_dependencies else {}
 
-    def keyset(self):
-        if self.__keys is None:
-            self.__keys = set()
-            for layer in self.layers.values():
-                self.__keys.update(layer.keys())
-        return self.__keys
-
-    @property
-    def dependents(self):
-        return reverse_dict(self.dependencies)
-
-    @property
-    def dicts(self):
-        # Backwards compatibility for now
-        return self.layers
+        # Makes sure that all layers are `Layer`
+        self.layers = {
+            k: v if isinstance(v, Layer) else BasicLayer(v)
+            for k, v in self.layers.items()
+        }
 
     @classmethod
     def _from_collection(cls, name, layer, collection):
@@ -331,6 +498,69 @@ class HighLevelGraph(Mapping):
     def __iter__(self):
         return toolz.unique(toolz.concat(self.layers.values()))
 
+    def keyset(self) -> Set:
+        """Get all keys of all the layers
+
+        This will in many cases materialize layers, which makes it
+        a relative cheap operation. See `get_all_external_keys()`
+        for a faster alternative.
+
+        Returns
+        -------
+        keys: Set
+            A set of all keys
+        """
+        if self._keys is None:
+            self._keys = set()
+            for layer in self.layers.values():
+                self._keys.update(layer.keys())
+        return self._keys
+
+    def get_all_external_keys(self) -> Set:
+        """Get all output keys of all layers
+
+        This will in most cases _not_ materialize any layers, which makes
+        it a relative cheap operation.
+
+        Returns
+        -------
+        keys: Set
+            A set of all external keys
+        """
+        if self._all_external_keys is None:
+            self._all_external_keys = set()
+            for layer in self.layers.values():
+                self._all_external_keys.update(layer.get_output_keys())
+        return self._all_external_keys
+
+    def get_all_dependencies(self) -> Mapping[Hashable, Set]:
+        """Get dependencies of all keys
+
+        This will in most cases materialize all layers, which makes
+        it an expensive operation.
+
+        Returns
+        -------
+        map: Mapping
+            A map that maps each key to its dependencies
+        """
+        all_keys = self.keyset()
+        missing_keys = all_keys.difference(self.key_dependencies.keys())
+        if missing_keys:
+            for layer in self.layers.values():
+                for k in missing_keys.intersection(layer.keys()):
+                    self.key_dependencies[k] = layer.get_dependencies(k, all_keys)
+        return self.key_dependencies
+
+    @property
+    def dependents(self):
+        return reverse_dict(self.dependencies)
+
+    @property
+    def dicts(self):
+        # Backwards compatibility for now
+        return self.layers
+
     def items(self):
         items = []
         seen = set()
@@ -371,30 +601,6 @@ class HighLevelGraph(Mapping):
         g = to_graphviz(self, **kwargs)
         return graphviz_to_file(g, filename, format)
 
-    def get_dependencies(self) -> Mapping[Hashable, Set]:
-        """Get dependencies of all keys in the HLG
-
-        Returns
-        -------
-        map: Mapping
-            A map that maps each key to its dependencies
-        """
-        if self.key_dependencies is None:
-            all_keys = self.keyset()
-            self.key_dependencies = {}
-            for layer in self.layers.values():
-                self.key_dependencies.update(layer.get_dependencies(all_keys))
-
-        return self.key_dependencies
-
-    def _fix_hlg_layers_inplace(self):
-        """Makes sure that all layers in hlg are `Layer`"""
-        new_layers = {}
-        for k, v in self.layers.items():
-            if not isinstance(v, Layer):
-                new_layers[k] = BasicLayer(v)
-        self.layers.update(new_layers)
-
     def _toposort_layers(self):
         """Sort the layers in a high level graph topologically
 
@@ -421,7 +627,7 @@ class HighLevelGraph(Mapping):
                     ready.add(k)
         return ret
 
-    def cull(self, keys: Set):
+    def cull(self, keys: Set) -> "HighLevelGraph":
         """Return new high level graph with only the tasks required to calculate keys.
 
         In other words, remove unnecessary tasks from dask.
@@ -433,24 +639,25 @@ class HighLevelGraph(Mapping):
             Culled high level graph
         """
 
-        self._fix_hlg_layers_inplace()
-        layers = self._toposort_layers()
-        all_keys = self.keyset()
-
+        all_ext_keys = self.get_all_external_keys()
         ret_layers = {}
         ret_key_deps = {}
-        for layer_name in reversed(layers):
+        for layer_name in reversed(self._toposort_layers()):
             layer = self.layers[layer_name]
-            key_deps = keys.intersection(layer)
-            if len(key_deps) > 0:
-                culled_layer, culled_deps = layer.cull(key_deps, all_keys)
-
+            # Let's cull the layer to produce its part of `keys`
+            output_keys = keys.intersection(layer.get_output_keys())
+            if len(output_keys) > 0:
+                culled_layer, culled_deps = layer.cull(output_keys, all_ext_keys)
+                # Update `keys` with all layer's external key dependencies, which
+                # are all the layer's dependencies (`culled_deps`) excluding
+                # the layer's output keys.
                 external_deps = set()
-                for k in culled_layer.keys():
-                    external_deps |= culled_deps[k]
-                external_deps.difference_update(culled_layer.keys())
-
+                for d in culled_deps.values():
+                    external_deps |= d
+                external_deps.difference_update(culled_layer.get_output_keys())
                 keys.update(external_deps)
+
+                # Save the culled layer and its key dependencies
                 ret_layers[layer_name] = culled_layer
                 ret_key_deps.update(culled_deps)
 
@@ -472,6 +679,9 @@ class HighLevelGraph(Mapping):
             for dep in deps:
                 if dep not in self.dependencies:
                     raise ValueError(f"{repr(dep)} not found in dependencies")
+
+        for layer in self.layers.values():
+            assert hasattr(layer, "annotations")
 
         # Re-calculate all layer dependencies
         dependencies = compute_layer_dependencies(self.layers)
