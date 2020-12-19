@@ -221,6 +221,7 @@ def test_from_bcolz_column_order():
 
 def test_from_pandas_dataframe():
     a = list("aaaaaaabbbbbbbbccccccc")
+    np.random.seed(123)
     df = pd.DataFrame(
         dict(a=a, b=np.random.randn(len(a))),
         index=pd.date_range(start="20120101", periods=len(a)),
