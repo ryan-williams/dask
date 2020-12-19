@@ -332,7 +332,12 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         return finalize, ()
 
     def __dask_postpersist__(self):
-        return type(self), (self._name, self._meta, self.divisions)
+        return type(self), (
+            self._name,
+            self._meta,
+            self.divisions,
+            self.partition_sizes,
+        )
 
     @property
     def _constructor(self):
@@ -372,13 +377,13 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
 
     @property
     def _args(self):
-        return (self.dask, self._name, self._meta, self.divisions)
+        return (self.dask, self._name, self._meta, self.divisions, self.partition_sizes)
 
     def __getstate__(self):
         return self._args
 
     def __setstate__(self, state):
-        self.dask, self._name, self._meta, self.divisions = state
+        self.dask, self._name, self._meta, self.divisions, self.partition_sizes = state
 
     def copy(self):
         """Make a copy of the dataframe
