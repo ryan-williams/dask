@@ -1238,7 +1238,10 @@ def fix_overlap(ddf, overlap):
 def compute_and_set_divisions(df, **kwargs):
     mins = df.index.map_partitions(M.min, meta=df.index)
     maxes = df.index.map_partitions(M.max, meta=df.index)
-    mins, maxes = compute(mins, maxes, **kwargs)
+
+    lens = df.index.map_partitions(len, meta=df.index)
+    mins, maxes, lens = compute(mins, maxes, lens, **kwargs)
+
     mins = remove_nans(mins)
     maxes = remove_nans(maxes)
 
@@ -1252,7 +1255,7 @@ def compute_and_set_divisions(df, **kwargs):
         )
 
     df.divisions = tuple(mins) + (list(maxes)[-1],)
-
+    df.partition_sizes = tuple(lens)
     overlap = [i for i in range(1, len(mins)) if mins[i] >= maxes[i - 1]]
     return fix_overlap(df, overlap) if overlap else df
 
