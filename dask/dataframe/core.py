@@ -3249,7 +3249,7 @@ Dask Name: {name}, {task} tasks""".format(
         else:
             meta = make_meta(meta, index=getattr(make_meta(self), "index", None))
 
-        return type(self)(graph, name, meta, self.divisions)
+        return type(self)(graph, name, meta, self.divisions, self.partition_sizes)
 
     @derived_from(pd.Series)
     def dropna(self):
