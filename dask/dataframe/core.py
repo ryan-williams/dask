@@ -542,7 +542,13 @@ Dask Name: {name}, {task} tasks"""
             divisions = self.divisions[n : n + 2]
             layer = {(name, 0): (self._name, n)}
             graph = HighLevelGraph.from_collections(name, layer, dependencies=[self])
-            return new_dd_object(graph, name, self._meta, divisions)
+            return new_dd_object(
+                graph,
+                name,
+                self._meta,
+                divisions,
+                [self.partition_sizes[n]] if self.partition_sizes else None,
+            )
         else:
             msg = "n must be 0 <= n < {0}".format(self.npartitions)
             raise ValueError(msg)
