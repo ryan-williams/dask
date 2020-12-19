@@ -521,7 +521,9 @@ def set_index(
             and all(mx < mn for mx, mn in zip(maxes[:-1], mins[1:]))
         ):
             divisions = mins + [maxes[-1]]
-            result = set_sorted_index(df, index, drop=drop, divisions=divisions)
+            result = set_sorted_index(
+                df, index, drop=drop, divisions=divisions
+            )  # TODO: partition_sizes
             return result.map_partitions(M.sort_index)
 
     return set_partition(
@@ -725,7 +727,9 @@ def rearrange_by_divisions(df, column, divisions, max_branch=None, shuffle=None)
     meta = df._meta._constructor_sliced([0])
     # Assign target output partitions to every row
     partitions = df[column].map_partitions(
-        set_partitions_pre, divisions=divisions, meta=meta
+        set_partitions_pre,
+        divisions=divisions,
+        meta=meta,  # TODO: partition_sizes
     )
     df2 = df.assign(_partitions=partitions)
 
@@ -1232,7 +1236,7 @@ def fix_overlap(ddf, overlap):
         dsk[(name, i - 1)] = (drop_overlap, dsk[(name, i - 1)], ddf.divisions[i])
 
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[ddf])
-    return new_dd_object(graph, name, ddf._meta, ddf.divisions)
+    return new_dd_object(graph, name, ddf._meta, ddf.divisions)  # TODO: partition_sizes
 
 
 def compute_and_set_divisions(df, **kwargs):
