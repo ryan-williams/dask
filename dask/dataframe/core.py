@@ -6177,9 +6177,27 @@ def _repartition_from_boundaries(df, new_partitions_boundaries, new_name):
         zip(new_partitions_boundaries, new_partitions_boundaries[1:])
     ):
         dsk[new_name, i] = (methods.concat, [(df._name, j) for j in range(start, end)])
+
+    partition_idx_starts = df.partition_idx_starts
+    if partition_idx_starts:
+        partition_idx_bounds = df.partition_idx_starts + (df._len,)
+        new_partition_idx_bounds = [
+            partition_idx_bounds[i] for i in new_partitions_boundaries
+        ]
+        partition_sizes = [
+            end - start
+            for start, end in zip(
+                new_partition_idx_bounds[:-1], new_partition_idx_bounds[1:]
+            )
+        ]
+    else:
+        partition_sizes = None
+
     divisions = [df.divisions[i] for i in new_partitions_boundaries]
     graph = HighLevelGraph.from_collections(new_name, dsk, dependencies=[df])
-    return new_dd_object(graph, new_name, df._meta, divisions)
+    return new_dd_object(
+        graph, new_name, df._meta, divisions, partition_sizes=partition_sizes
+    )
 
 
 def _split_partitions(df, nsplits, new_name):
