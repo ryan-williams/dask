@@ -518,7 +518,9 @@ Dask Name: {name}, {task} tasks"""
     def clear_divisions(self):
         """ Forget division information """
         divisions = (None,) * (self.npartitions + 1)
-        return type(self)(self.dask, self._name, self._meta, divisions)
+        return type(self)(
+            self.dask, self._name, self._meta, divisions, partition_sizes=None
+        )  # TODO: should partition_sizes be preserved here?
 
     def get_partition(self, n):
         """Get a dask DataFrame/Series representing the `nth` partition."""
@@ -1415,7 +1417,9 @@ Dask Name: {name}, {task} tasks"""
         }
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(graph, name, self._meta, self.divisions)
+        return new_dd_object(
+            graph, name, self._meta, self.divisions
+        )  # TODO: partition_sizes
 
     @derived_from(pd.DataFrame)
     def replace(self, to_replace=None, value=None, regex=False):
@@ -2814,7 +2818,7 @@ Dask Name: {name}, {task} tasks"""
             "loc",
         )
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(graph, name, self, divs)
+        return new_dd_object(graph, name, self, divs)  # TODO: partition_sizes
 
     @derived_from(pd.DataFrame)
     def last(self, offset):
@@ -2848,7 +2852,7 @@ Dask Name: {name}, {task} tasks"""
             "loc",
         )
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(graph, name, self, divs)
+        return new_dd_object(graph, name, self, divs)  # TODO: partition_sizes
 
     def nunique_approx(self, split_every=None):
         """Approximate number of unique rows.
@@ -5481,7 +5485,7 @@ def apply_concat_apply(
 
     divisions = [None] * (split_out + 1)
 
-    return new_dd_object(graph, b, meta, divisions)
+    return new_dd_object(graph, b, meta, divisions)  # TODO: partition_sizes
 
 
 aca = apply_concat_apply
