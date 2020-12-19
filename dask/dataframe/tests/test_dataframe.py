@@ -4,6 +4,8 @@ from operator import add
 
 import pytest
 import numpy as np
+from numpy import nan
+from numpy.testing import assert_equal
 import pandas as pd
 from pandas.io.formats import format as pandas_format
 
@@ -2633,26 +2635,32 @@ def test_to_dask_array_raises(as_frame):
 
 
 @pytest.mark.parametrize("as_frame", [False, True])
-def test_to_dask_array_unknown(as_frame):
+@pytest.mark.parametrize("partition_sizes", [False, True])
+def test_to_dask_array_unknown(as_frame, partition_sizes):
     s = pd.Series([1, 2, 3, 4, 5], name="foo")
     a = dd.from_pandas(s, chunksize=2)
 
     if as_frame:
         a = a.to_frame()
 
+    assert a.partition_sizes == (2, 3)
+    if not partition_sizes:
+        a.partition_sizes = None
+
     result = a.to_dask_array()
     assert isinstance(result, da.Array)
-    result = result.chunks
+    chunks = result.chunks
 
     if as_frame:
-        assert len(result) == 2
-        assert result[1] == (1,)
+        if partition_sizes:
+            assert chunks == ((2, 3), (1,))
+        else:
+            assert_equal(chunks, ((nan, nan), (1,)))
     else:
-        assert len(result) == 1
-
-    result = result[0]
-    assert len(result) == 2
-    assert all(np.isnan(x) for x in result)
+        if partition_sizes:
+            assert chunks == ((2, 3),)
+        else:
+            assert_equal(chunks, ((nan, nan),))
 
 
 @pytest.mark.parametrize(
