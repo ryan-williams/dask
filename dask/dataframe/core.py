@@ -4981,6 +4981,7 @@ def handle_out(out, result):
 
         if not isinstance(out, Scalar):
             out.divisions = result.divisions
+            out.partition_sizes = result.partition_sizes
     elif out is not None:
         msg = (
             "The out parameter is not fully supported."
