@@ -3034,29 +3034,54 @@ def test_nlargest_nsmallest():
         assert res._name != res2._name
 
 
-def test_reset_index():
+@pytest.mark.parametrize("partition_sizes", [False])#[True, False])
+def test_reset_index(partition_sizes):
     df = pd.DataFrame({"x": [1, 2, 3, 4], "y": [10, 20, 30, 40]})
     ddf = dd.from_pandas(df, npartitions=2)
 
+    if not partition_sizes:
+        ddf.partition_sizes = None
+
+    # TODO: reset_index() returns incorrect index values when partition_sizes is unset: each partition gets an index
+    # spanning [0,n) (where n is the size of the partition), while behaving consistently with Pandas would require each
+    # partition to be indexed starting from the cumulative index from the start of the DataFrame (which the
+    # partition-size-aware implementation of `reset_index` does).
+
     sol = df.reset_index()
     res = ddf.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    if partition_sizes:
+        assert res.divisions == (0, 2, 3)
+        assert res.partition_sizes == (2, 2)
+    else:
+        assert res.divisions == (None,)*3
+        assert res.partition_sizes is None
+    assert_eq(res, sol, check_index=partition_sizes)
 
     sol = df.reset_index(drop=True)
     res = ddf.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    if partition_sizes:
+        assert res.divisions == (0, 2, 3)
+        assert res.partition_sizes == (2, 2)
+    else:
+        assert res.divisions == (None,)*3
+        assert res.partition_sizes is None
+    assert_eq(res, sol, check_index=partition_sizes)
 
     sol = df.x.reset_index()
     res = ddf.x.reset_index()
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    if partition_sizes:
+        assert res.divisions == (0, 2, 3)
+        assert res.partition_sizes == (2, 2)
+    else:
+        assert res.divisions == (None,)*3
+        assert res.partition_sizes is None
+    assert_eq(res, sol, check_index=partition_sizes)
 
     sol = df.x.reset_index(drop=True)
     res = ddf.x.reset_index(drop=True)
-    assert all(d is None for d in res.divisions)
-    assert_eq(res, sol, check_index=False)
+    assert res.divisions == (0, 2, 3)
+    assert res.partition_sizes == (2, 2)
+    assert_eq(res, sol, check_index=partition_sizes)
 
 
 def test_dataframe_compute_forward_kwargs():
