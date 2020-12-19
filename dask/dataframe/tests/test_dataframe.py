@@ -4558,4 +4558,4 @@ def test_join_series():
     ddf = dd.from_pandas(df, npartitions=1)
     expected_df = dd.from_pandas(df.join(df["x"], lsuffix="_"), npartitions=1)
     actual_df = ddf.join(ddf["x"], lsuffix="_")
-    assert_eq(actual_df, expected_df, partition_sizes=[None, (8,)])
+    assert_eq(actual_df, expected_df, partition_sizes=[(8,), (8,)])
