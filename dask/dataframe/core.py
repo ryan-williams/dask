@@ -4545,7 +4545,8 @@ class DataFrame(_Frame):
     @derived_from(pd.DataFrame)
     def mode(self, dropna=True, split_every=False):
         mode_series_list = []
-        for col_index in range(len(self.columns)):
+        ncols = len(self.columns)
+        for col_index in range(ncols):
             col_series = self.iloc[:, col_index]
             mode_series = Series.mode(
                 col_series, dropna=dropna, split_every=split_every
@@ -4568,7 +4569,9 @@ class DataFrame(_Frame):
         graph = HighLevelGraph.from_collections(
             name, dsk, dependencies=mode_series_list
         )
-        ddf = new_dd_object(graph, name, meta, divisions=(None, None))
+        ddf = new_dd_object(
+            graph, name, meta, divisions=(None, None), partition_sizes=(ncols,)
+        )
 
         return ddf
 
