@@ -6280,9 +6280,10 @@ def repartition(df, divisions=None, force=False):
         name = "repartition-dataframe-" + token
         from .utils import shard_df_on_index
 
-        dfs = shard_df_on_index(df, divisions[1:-1])
+        dfs = list(shard_df_on_index(df, divisions[1:-1]))
+        partition_sizes = [ len(df) for df in dfs ]
         dsk = dict(((name, i), df) for i, df in enumerate(dfs))
-        return new_dd_object(dsk, name, df, divisions)
+        return new_dd_object(dsk, name, df, divisions, partition_sizes=partition_sizes)
     raise ValueError("Data must be DataFrame or Series")
 
 
