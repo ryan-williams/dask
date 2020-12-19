@@ -110,7 +110,7 @@ def finalize(results):
 class Scalar(DaskMethodsMixin, OperatorMethodMixin):
     """ A Dask object to represent a pandas scalar"""
 
-    def __init__(self, dsk, name, meta, divisions=None):
+    def __init__(self, dsk, name, meta, divisions=None, partition_sizes=None):
         # divisions is ignored, only present to be compatible with other
         # objects.
         if not isinstance(dsk, HighLevelGraph):
@@ -286,7 +286,7 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         Values along which we partition our blocks on the index
     """
 
-    def __init__(self, dsk, name, meta, divisions):
+    def __init__(self, dsk, name, meta, divisions, partition_sizes=None):
         if not isinstance(dsk, HighLevelGraph):
             dsk = HighLevelGraph.from_collections(name, dsk, dependencies=[])
         self.dask = dsk
@@ -299,6 +299,17 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
             )
         self._meta = meta
         self.divisions = tuple(divisions)
+
+        if partition_sizes is None:
+            self.partition_sizes = None
+        else:
+            if divisions:
+                if len(partition_sizes) + 1 != len(divisions):
+                    raise AssertionError(
+                        "partition_sizes len %d doesn't correspond to divisions len %d"
+                        % (len(partition_sizes), len(divisions))
+                    )
+            self.partition_sizes = tuple(partition_sizes)
 
     def __dask_graph__(self):
         return self.dask
