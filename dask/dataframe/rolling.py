@@ -312,6 +312,7 @@ class Rolling:
                 *args,
                 token=method_name,
                 meta=meta,
+                # TODO: partition_sizes
                 **kwargs,
             )
         # Convert window to overlap
