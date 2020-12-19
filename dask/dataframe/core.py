@@ -6615,7 +6615,7 @@ if hasattr(pd, "isna"):
 
     @wraps(pd.isna)
     def isna(arg):
-        return map_partitions(pd.isna, arg)
+        return map_partitions(pd.isna, arg, preserve_partition_sizes=True)
 
 
 def _repr_data_series(s, index):
