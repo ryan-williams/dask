@@ -1238,7 +1238,8 @@ def fix_overlap(ddf, overlap):
         dsk[(name, i - 1)] = (drop_overlap, dsk[(name, i - 1)], ddf.divisions[i])
 
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[ddf])
-    return new_dd_object(graph, name, ddf._meta, ddf.divisions)  # TODO: partition_sizes
+    # can't determine number of overlapping/dropped records statically, so no partition_sizes
+    return new_dd_object(graph, name, ddf._meta, ddf.divisions)
 
 
 def compute_and_set_sorted_divisions(df, **kwargs):
@@ -1249,7 +1250,8 @@ def compute_and_set_sorted_divisions(df, **kwargs):
     # single dtype (e.g. converting ints to floats when there is an empty/nan partition)
     mins = tuple(index.partitions[i].map_partitions(M.min, meta=index) for i in range(index.npartitions))
     maxs = tuple(index.partitions[i].map_partitions(M.max, meta=index) for i in range(index.npartitions))
-    mins, maxs = compute(mins, maxs, **kwargs)
+    lens = index.map_partitions(len, meta=index)
+    mins, maxs, lens = compute(mins, maxs, lens, **kwargs)
     mins = [m.iloc[0] for m in mins]
     maxs = [m.iloc[0] for m in maxs]
     mins = remove_nans(mins)
@@ -1267,7 +1269,11 @@ def compute_and_set_sorted_divisions(df, **kwargs):
     df.divisions = tuple(mins) + (list(maxs)[-1],)
 
     overlap = [i for i in range(1, len(mins)) if mins[i] == maxs[i - 1]]
-    return fix_overlap(df, overlap) if overlap else df
+    if overlap:
+        return fix_overlap(df, overlap)
+    else:
+        df.partition_sizes = tuple(lens)
+        return df
 
 
 def set_sorted_index(df, index, drop=True, divisions=None, **kwargs):
