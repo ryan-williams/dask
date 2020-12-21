@@ -2535,13 +2535,6 @@ def test_drop_columns(columns):
     assert_eq(df.drop(columns=columns), ddf2)
 
 
-def test_gh580():
-    df = pd.DataFrame({"x": np.arange(10, dtype=float)})
-    ddf = dd.from_pandas(df, 2)
-    assert_eq(np.cos(df["x"]), np.cos(ddf["x"]))
-    assert_eq(np.cos(df["x"]), np.cos(ddf["x"]))
-
-
 def test_gh6305():
     df = pd.DataFrame({"x": np.arange(3, dtype=float)})
     ddf = dd.from_pandas(df, 1)
