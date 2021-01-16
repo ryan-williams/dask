@@ -4626,7 +4626,9 @@ class DataFrame(_Frame):
         graph = HighLevelGraph.from_collections(
             name, dsk, dependencies=mode_series_list
         )
-        ddf = new_dd_object(graph, name, meta, divisions=(None, None))
+        ddf = new_dd_object(
+            graph, name, meta, divisions=(None, None), partition_sizes=None
+        )
 
         return ddf
 
