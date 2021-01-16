@@ -6,7 +6,7 @@ from operator import add
 import pytest
 import numpy as np
 from numpy import nan
-from numpy.testing import assert_equal
+from numpy.testing import assert_equal, assert_array_equal
 import pandas as pd
 from pandas.io.formats import format as pandas_format
 
@@ -208,6 +208,45 @@ def test_attributes():
 
     df = dd.from_pandas(_compat.makeTimeDataFrame(), npartitions=3)
     pytest.raises(AttributeError, lambda: df.foo)
+
+
+def test_partition_sizes():
+    df = dd.from_pandas(
+        pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)]), npartitions=3
+    )
+    assert df.partition_sizes == (34, 34, 32)
+    assert df.i.partition_sizes == (34, 34, 32)
+    assert df.i.map(len).partition_sizes == (34, 34, 32)
+    df["len"] = df.i.map(len)
+    assert df.partition_sizes == (34, 34, 32)
+    assert df["len"].partition_sizes == (34, 34, 32)
+    assert df["i"].partition_sizes == (34, 34, 32)
+    assert len(df.compute()) == 100
+    assert tuple(len(partition.compute()) for partition in df.partitions) == (
+        34,
+        34,
+        32,
+    )
+
+    for series in [
+        df.len + 2,
+        df.len - 2,
+        df.len * 2,
+        df.len / 2,
+        df.len % 2,
+        df.len % 2 == 0,
+    ]:
+        assert series.partition_sizes == (34, 34, 32)
+
+    # "dynamic" slice results in unknown `partition_sizes` (impossible to know "statically" how many elements are even
+    # vs. odd)
+    evens = df.len % 2 == 0
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
+
+    a = np.array(range(1100)).reshape((100, 11))
+    d = da.from_array(a, chunks=(23, 4))
+    assert d.chunks == ((23, 23, 23, 23, 8), (4, 4, 3))
 
 
 def test_column_names():
