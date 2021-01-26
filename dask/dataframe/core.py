@@ -6158,6 +6158,9 @@ def repartition_npartitions(df, npartitions):
                 )
             elif np.issubdtype(original_divisions.dtype, np.integer):
                 divisions = divisions.astype(original_divisions.dtype)
+                # coercion back to ints can result in duplicate `divisions` entries (which fails `check_divisions`
+                # validation; silently "drop" would-be empty partitions here)
+                divisions = np.unique(divisions)
 
             if isinstance(divisions, np.ndarray):
                 divisions = divisions.tolist()
