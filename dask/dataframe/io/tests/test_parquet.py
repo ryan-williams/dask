@@ -2932,12 +2932,12 @@ def test_from_pandas_preserve_none_index(tmpdir, engine):
     assert_eq(expect, got)
 
 
-def test_multi_partition_none_index_false(tmpdir, engine):
+def test_multi_partition_none_index_false(tmpdir):
     check_pyarrow()
     if pa.__version__ < LooseVersion("0.15.0"):
         pytest.skip("PyArrow>=0.15 Required.")
 
-    # Write dataset without dast.to_parquet
+    # Write dataset without dask.to_parquet
     ddf1 = ddf.reset_index(drop=True)
     for i, part in enumerate(ddf1.partitions):
         path = tmpdir.join(f"test.{i}.parquet")
