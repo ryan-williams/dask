@@ -461,8 +461,6 @@ def _analyze_paths(file_list, fs, root=False):
                     j = k
                     break
             basepath = basepath[:j]
-        l = len(basepath)
-
     else:
         basepath = _join_path(root).split("/")
         l = len(basepath)
