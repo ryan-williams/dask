@@ -1104,9 +1104,9 @@ def test_shuffle_hlg_layer():
 @pytest.mark.parametrize(
     "npartitions",
     [
-        10,  # ShuffleLayer
-        1,  # SimpleShuffleLayer
-    ],
+        10,
+        1,
+    ],  # ShuffleLayer  # SimpleShuffleLayer
 )
 def test_shuffle_hlg_layer_serialize(npartitions):
     ddf = dd.from_pandas(
