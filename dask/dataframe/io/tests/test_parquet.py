@@ -2308,10 +2308,15 @@ def test_read_glob_yes_meta(tmpdir, write_engine, read_engine):
     )
 
 
-@pytest.mark.parametrize("statistics", [True, False, None])
-@pytest.mark.parametrize("remove_common", [True, False])
-@write_read_engines()
-def test_read_dir_nometa(tmpdir, write_engine, read_engine, statistics, remove_common):
+# @pytest.mark.parametrize("statistics", [True, False, None])
+# @pytest.mark.parametrize("remove_common", [True, False])
+# @write_read_engines()
+# def test_read_dir_nometa(tmpdir, write_engine, read_engine, statistics, remove_common):
+def test_read_dir_nometa(tmpdir):
+    write_engine = 'fastparquet'
+    read_engine = 'fastparquet'
+    statistics = True
+    remove_common = True
     tmp_path = str(tmpdir)
     ddf.to_parquet(tmp_path, engine=write_engine)
     if os.path.exists(os.path.join(tmp_path, "_metadata")):
@@ -2332,7 +2337,7 @@ def test_read_dir_nometa(tmpdir, write_engine, read_engine, statistics, remove_c
     assert_eq(
         ddf,
         ddf2,
-        check_divisions=False,
+        divisions=tuple(range(0, 420, 30)),
         partition_sizes=partition_sizes,
     )
 
