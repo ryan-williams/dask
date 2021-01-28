@@ -1,5 +1,7 @@
 import re
 
+from ....utils import natural_sort_key
+
 
 class Engine:
     """ The API necessary to provide a new Parquet reader/writer """
@@ -470,7 +472,12 @@ def _analyze_paths(file_list, fs, root=False):
             "/".join(path_parts[l:])
         )  # use '/'.join() instead of _join_path to be consistent with split('/')
 
+    # numeric rather than glob ordering
+    out_list = sorted(out_list, key=natural_sort_key)
+    file_list = sorted(file_list, key=natural_sort_key)
+
     return (
+        file_list,
         "/".join(basepath),
         out_list,
     )  # use '/'.join() instead of _join_path to be consistent with split('/')

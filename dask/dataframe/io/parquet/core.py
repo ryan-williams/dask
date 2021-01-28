@@ -728,9 +728,8 @@ def create_metadata_file(
 
     # Process input path list
     fs, _, paths = get_fs_token_paths(paths, mode="rb", storage_options=storage_options)
-    paths = sorted(paths, key=natural_sort_key)  # numeric rather than glob ordering
     ap_kwargs = {"root": root_dir} if root_dir else {}
-    root_dir, fns = _analyze_paths(paths, fs, **ap_kwargs)
+    paths, root_dir, fns = _analyze_paths(paths, fs, **ap_kwargs)
     out_dir = root_dir if out_dir is None else out_dir
 
     # Start constructing a raw graph
