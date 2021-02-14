@@ -3544,7 +3544,7 @@ def common_blockdim(blockdims):
 
     if np.isnan(sum(map(sum, blockdims))):
         raise ValueError(
-            "Arrays chunk sizes (%s) are unknown.\n\n"
+            "Array's chunk sizes (%s) are unknown.\n\n"
             "A possible solution:\n"
             "  x.compute_chunk_sizes()" % blockdims
         )
