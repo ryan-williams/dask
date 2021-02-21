@@ -12,6 +12,7 @@ from operator import add, sub, getitem
 from threading import Lock
 import warnings
 
+from numpy.testing import assert_array_equal
 from tlz import merge, countby, concat
 from tlz.curried import identity
 
@@ -52,6 +53,7 @@ from dask.blockwise import (
 from dask.array.utils import assert_eq, same_keys
 
 from numpy import nancumsum, nancumprod
+from numpy.testing import assert_almost_equal, assert_array_equal
 
 
 def test_getem():
@@ -3297,6 +3299,62 @@ def test_A_property():
     assert x.A is x
 
 
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_A_property_matrix():
+    x = da.ones((5, 5), chunks=(2, 2))
+    assert x.A is x
+
+    from numpy import array, float64, matrix, ndarray
+
+    y = x.map_blocks(matrix)
+    assert type(y._meta) is matrix
+    assert_array_equal(y._meta, matrix([], dtype=float64).reshape(0, 0))
+    yc = y.compute()
+    assert type(yc) is matrix
+
+    A = y.A
+    assert type(A._meta) is ndarray
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0, 0)))
+    Ac = A.compute()
+    assert type(Ac) is ndarray
+
+    assert_eq(Ac, yc)
+
+
+@pytest.mark.parametrize("spmatrix", ["csr", "csc", "coo"])
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_A_property_spmatrix(spmatrix):
+    pytest.importorskip("scipy.sparse")
+
+    x = da.ones((5, 5), chunks=(2, 2))
+    assert x.A is x
+
+    from numpy import array, float64, ndarray
+
+    from scipy.sparse import csr_matrix, csc_matrix, coo_matrix
+
+    mat_map = {
+        "csr": csr_matrix,
+        "csc": csc_matrix,
+        "coo": coo_matrix,
+    }
+    mat = mat_map[spmatrix]
+
+    y = x.map_blocks(mat)
+    assert type(y._meta) is mat
+    empty = mat([], dtype=float64).reshape(0, 0)
+    assert (y._meta != empty).nnz == 0
+
+    A = y.A
+    assert A is not y
+    assert_eq(A.compute(), y.compute())
+    assert type(A._meta) is ndarray
+
+    from numpy.testing import assert_array_equal
+
+    assert_array_equal(A._meta, array([], dtype=float64).reshape((0, 0)))
+
+
 def test_copy_mutate():
     x = da.arange(5, chunks=(2,))
     y = x.copy()
@@ -4333,6 +4391,39 @@ def test_partitions_indexer():
 
 
 @pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+def test_dask_array_holds_numpy_matrix_containers():
+    x = da.random.random((100, 10), chunks=(10, 5))
+    assert isinstance(x._meta, np.ndarray)
+    xx = x.compute()
+    assert isinstance(xx, np.ndarray)
+
+    y = x.map_blocks(np.matrix)
+    assert isinstance(y._meta, np.matrix)
+    yy = y.compute()
+    assert isinstance(yy, np.matrix)
+
+    assert_array_equal(yy, xx)
+
+    xT = x.T
+    assert isinstance(xT._meta, np.ndarray)
+    xxT = xT.compute()
+    assert isinstance(xxT, np.ndarray)
+
+    yT = y.T
+    assert isinstance(yT._meta, np.matrix)
+    yyT = yT.compute()
+    assert isinstance(yyT, np.matrix)
+
+    assert_array_equal(yyT, xxT)
+
+    z = x.T.map_blocks(np.matrix)
+    zz = z.compute()
+    assert isinstance(zz, np.matrix)
+
+    assert_array_equal(zz, xx.T)
+
+
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
 def test_dask_array_holds_scipy_sparse_containers():
     pytest.importorskip("scipy.sparse")
     import scipy.sparse
@@ -4356,8 +4447,10 @@ def test_dask_array_holds_scipy_sparse_containers():
     assert (zz == xx.T).all()
 
 
-@pytest.mark.parametrize("axis", [0, 1])
-def test_scipy_sparse_concatenate(axis):
+@pytest.mark.parametrize(
+    "axis,stack,spmatrix", [(0, "vstack", "csr"), (1, "hstack", "coo")]
+)
+def test_scipy_sparse_concatenate(axis, stack, spmatrix):
     pytest.importorskip("scipy.sparse")
     import scipy.sparse
 
@@ -4372,15 +4465,23 @@ def test_scipy_sparse_concatenate(axis):
         ys.append(x.map_blocks(scipy.sparse.csr_matrix))
 
     z = da.concatenate(ys, axis=axis)
-    z = z.compute()
+    zz = z.compute()
 
-    if axis == 0:
+    if spmatrix == "coo":
+        spmatrix = scipy.sparse.coo_matrix
+    else:
+        spmatrix = scipy.sparse.csr_matrix
+
+    assert isinstance(zz, spmatrix)
+
+    if stack == "vstack":
         sp_concatenate = scipy.sparse.vstack
-    elif axis == 1:
+    else:
         sp_concatenate = scipy.sparse.hstack
+
     z_expected = sp_concatenate([scipy.sparse.csr_matrix(e.compute()) for e in xs])
 
-    assert (z != z_expected).nnz == 0
+    assert (zz != z_expected).nnz == 0
 
 
 def test_3851():
@@ -4681,3 +4782,89 @@ def test_dask_layers():
     assert b.dask.layers.keys() == {a.name, b.name}
     assert b.dask.dependencies == {a.name: set(), b.name: {a.name}}
     assert b.__dask_layers__() == (b.name,)
+
+
+@pytest.mark.filterwarnings("ignore:the matrix subclass:PendingDeprecationWarning")
+@pytest.mark.parametrize(
+    "axis",
+    [
+        0,
+        1,
+        None,
+    ],
+)
+def test_numpy_matrix_sum(axis):
+    pytest.importorskip("numpy")
+
+    x = da.ones((5, 10), chunks=(2, 3))
+
+    from numpy import array, float64, matrix
+
+    y = x.map_blocks(matrix)
+    assert type(y._meta) is matrix
+    assert_array_equal(y._meta, matrix([], dtype=float64).reshape(0, 0))
+    yc = y.compute()
+    assert type(yc) is matrix
+
+    sum = y.sum(axis=axis)
+    assert_array_equal(sum._meta, array([], dtype=float64).reshape((0, 0)))
+    sumc = sum.compute()
+    csum = yc.sum(axis=axis)
+    if axis is None:
+        assert sumc == csum
+    else:
+        assert_array_equal(sumc, csum)
+
+
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        "csr",
+        "csc",
+        "coo",
+    ],
+)
+@pytest.mark.parametrize(
+    "axis",
+    [
+        0,
+        1,
+        None,
+    ],
+)
+def test_scipy_sparse_sum(fmt, axis):
+    pytest.importorskip("scipy.sparse")
+    from scipy.sparse import coo_matrix, csc_matrix, csr_matrix, random
+
+    fmt_map = {
+        "coo": coo_matrix,
+        "csc": csc_matrix,
+        "csr": csr_matrix,
+    }
+    fmt_cls = fmt_map[fmt]
+
+    M, N = 100, 100
+    m, n = 20, 10
+    if fmt == "coo":
+        spmat = random(M, N, format="csr")
+        x = da.from_array(spmat, chunks=(m, n), asarray=False).map_blocks(coo_matrix)
+    else:
+        spmat = random(M, N, format=fmt)
+        assert isinstance(spmat, fmt_cls)
+        x = da.from_array(spmat, chunks=(m, n), asarray=False)
+
+    block_typenames = x.map_blocks(
+        lambda c: np.array([[type(c).__name__]]), dtype=object
+    ).compute()
+    expected = np.full(((M + m - 1) // m, (N + n - 1) // n), "%s_matrix" % fmt)
+    assert_eq(block_typenames, expected)
+
+    xx = x.compute()
+    # All spmatrices come out of Dask as COOs, since that's the only(?) format that can easily
+    # concatenate along either axis
+    assert isinstance(xx, coo_matrix)
+    assert (spmat != xx).nnz == 0
+
+    dask_sum = x.sum(axis=axis).compute()
+    spmat_sum = spmat.sum(axis=axis)
+    assert_almost_equal(dask_sum, spmat_sum)
