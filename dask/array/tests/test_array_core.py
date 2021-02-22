@@ -4862,9 +4862,10 @@ def test_scipy_sparse_sum(fmt, axis):
     xx = x.compute()
     # All spmatrices come out of Dask as COOs, since that's the only(?) format that can easily
     # concatenate along either axis
+    # TODO: special case this in compute machinery
     assert isinstance(xx, coo_matrix)
     assert (spmat != xx).nnz == 0
-
+    # TODO: test compute one block 
     dask_sum = x.sum(axis=axis).compute()
     spmat_sum = spmat.sum(axis=axis)
     assert_almost_equal(dask_sum, spmat_sum)
