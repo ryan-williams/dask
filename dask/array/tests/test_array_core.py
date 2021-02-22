@@ -3700,6 +3700,7 @@ def test_setitem_2d():
     assert_eq(x, dx)
 
 
+@pytest.mark.skip(reason="https://github.com/dask/dask/issues/7261; unbounded OS thread use")
 def test_setitem_extended_API():
     x = np.ma.arange(60).reshape((6, 10))
     dx = da.from_array(x.copy(), chunks=(2, 2))
