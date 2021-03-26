@@ -1121,9 +1121,28 @@ Dask Name: {name}, {task} tasks"""
         else:
             dsk = {(name, 0): (head, (self._name, 0), n)}
 
+        partition_sizes = None
+        if self.partition_sizes:
+            partition_sizes = list(self.partition_sizes[:npartitions])
+            num_elems = sum(partition_sizes)
+            idx = npartitions - 1
+            while num_elems > n and idx >= 0:
+                cur_size = partition_sizes[idx]
+                if cur_size >= num_elems:
+                    partition_sizes[idx] -= num_elems
+                    break
+                else:
+                    partition_sizes[idx] = 0
+                    num_elems -= cur_size
+                    idx -= 1
+
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
         result = new_dd_object(
-            graph, name, self._meta, [self.divisions[0], self.divisions[npartitions]]
+            graph,
+            name,
+            self._meta,
+            [self.divisions[0], self.divisions[npartitions]],
+            partition_sizes,
         )
 
         if compute:
@@ -1139,7 +1158,15 @@ Dask Name: {name}, {task} tasks"""
         dsk = {(name, 0): (M.tail, (self._name, self.npartitions - 1), n)}
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        result = new_dd_object(graph, name, self._meta, self.divisions[-2:])
+
+        partition_sizes = None
+        if self.partition_sizes:
+            size = min(n, self.partition_sizes[-1])
+            partition_sizes = [size]
+
+        result = new_dd_object(
+            graph, name, self._meta, self.divisions[-2:], partition_sizes
+        )
 
         if compute:
             result = result.compute()
@@ -1394,7 +1421,9 @@ Dask Name: {name}, {task} tasks"""
                 for i in range(self.npartitions)
             }
             graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-            parts = new_dd_object(graph, name, meta, self.divisions)
+            parts = new_dd_object(
+                graph, name, meta, self.divisions, self.partition_sizes
+            )
         else:
             parts = self
 
@@ -2786,6 +2815,27 @@ Dask Name: {name}, {task} tasks"""
             enforce_metadata=False,
         )
 
+        from .multi import maybe_infer_partition_sizes
+
+        if join == "left":
+            out_size_guide = self
+        elif join == "right":
+            out_size_guide = other
+        else:
+            out_size_guide = None
+
+        if axis in [1, "1", "columns"]:
+            out_size_guides = (self, other)
+        else:
+            out_size_guides = (out_size_guide, out_size_guide)
+
+        partition_sizes1 = maybe_infer_partition_sizes(
+            aligned.divisions, out_size_guides[0]
+        )
+        partition_sizes2 = maybe_infer_partition_sizes(
+            aligned.divisions, out_size_guides[1]
+        )
+
         token = tokenize(self, other, join, axis, fill_value)
 
         name1 = "align1-" + token
@@ -2794,7 +2844,9 @@ Dask Name: {name}, {task} tasks"""
             for i, key in enumerate(aligned.__dask_keys__())
         }
         dsk1.update(aligned.dask)
-        result1 = new_dd_object(dsk1, name1, meta1, aligned.divisions)
+        result1 = new_dd_object(
+            dsk1, name1, meta1, aligned.divisions, partition_sizes=partition_sizes1
+        )
 
         name2 = "align2-" + token
         dsk2 = {
@@ -2802,7 +2854,9 @@ Dask Name: {name}, {task} tasks"""
             for i, key in enumerate(aligned.__dask_keys__())
         }
         dsk2.update(aligned.dask)
-        result2 = new_dd_object(dsk2, name2, meta2, aligned.divisions)
+        result2 = new_dd_object(
+            dsk2, name2, meta2, aligned.divisions, partition_sizes=partition_sizes2
+        )
 
         return result1, result2
 
@@ -3697,10 +3751,38 @@ class Index(Series):
         Caveat, this only checks the first partition.
         """
         name = "head-%d-%s" % (n, self._name)
-        dsk = {(name, 0): (operator.getitem, (self._name, 0), slice(0, n))}
-        graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
+        if self.partition_sizes:
+            num = n
+            idx = 0
+            partition_sizes = []
+            while num > 0 and idx < self.npartitions:
+                cur = self.partition_sizes[idx]
+                if cur >= num:
+                    partition_sizes.append(num)
+                    num = 0
+                    break
+                else:
+                    partition_sizes.append(cur)
+                    num -= cur
+                idx += 1
 
-        result = new_dd_object(graph, name, self._meta, self.divisions[:2])
+            dsk = {(name, i): (lambda x: x, (self._name, i)) for i in range(idx)}
+            dsk[(name, idx)] = (
+                operator.getitem,
+                (self._name, idx),
+                slice(0, partition_sizes[-1]),
+            )
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
+
+            result = new_dd_object(
+                graph, name, self._meta, self.divisions[:2], partition_sizes
+            )
+
+        else:
+            dsk = {(name, 0): (operator.getitem, (self._name, 0), slice(0, n))}
+            graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
+
+            result = new_dd_object(graph, name, self._meta, self.divisions[:2])
 
         if compute:
             result = result.compute()
@@ -4784,7 +4866,9 @@ class DataFrame(_Frame):
         graph = HighLevelGraph.from_collections(
             name, dsk, dependencies=mode_series_list
         )
-        ddf = new_dd_object(graph, name, meta, divisions=(None, None))
+        ddf = new_dd_object(
+            graph, name, meta, divisions=(None, None), partition_sizes=None
+        )
 
         return ddf
 
@@ -5169,7 +5253,11 @@ def elemwise(op, *args, **kwargs):
 
     from .multi import _maybe_align_partitions
 
+    original_args = args
     args = _maybe_align_partitions(args)
+    # TODO: is this a valid way to test whether partitions were already aligned?
+    partitions_already_aligned = args is original_args
+
     dasks = [arg for arg in args if isinstance(arg, (_Frame, Scalar, Array))]
     dfs = [df for df in dasks if isinstance(df, _Frame)]
 
@@ -5192,6 +5280,8 @@ def elemwise(op, *args, **kwargs):
 
     divisions = dfs[0].divisions
     if transform_divisions and isinstance(dfs[0], Index) and len(dfs) == 1:
+        # TODO: not sure about partition-size implications of this block
+        partitions_already_aligned = False
         try:
             divisions = op(
                 *[pd.Index(arg.divisions) if arg is dfs[0] else arg for arg in args],
@@ -5236,7 +5326,12 @@ def elemwise(op, *args, **kwargs):
         with raise_on_meta_error(funcname(op)):
             meta = partial_by_order(*parts, function=op, other=other)
 
-    result = new_dd_object(graph, _name, meta, divisions)
+    partition_sizes = None
+    if partitions_already_aligned:
+        partition_sizes = dfs[0].partition_sizes
+    result = new_dd_object(
+        graph, _name, meta, divisions, partition_sizes=partition_sizes
+    )
     return handle_out(out, result)
 
 
@@ -6610,8 +6705,13 @@ def repartition(df, divisions=None, force=False):
         dsk = repartition_divisions(
             df.divisions, divisions, df._name, tmp, out, force=force
         )
+        from .multi import maybe_infer_partition_sizes
+
+        partition_sizes = maybe_infer_partition_sizes(divisions, df)
         graph = HighLevelGraph.from_collections(out, dsk, dependencies=[df])
-        return new_dd_object(graph, out, df._meta, divisions)
+        return new_dd_object(
+            graph, out, df._meta, divisions, partition_sizes=partition_sizes
+        )
     elif is_dataframe_like(df) or is_series_like(df):
         name = "repartition-dataframe-" + token
         from .utils import shard_df_on_index
