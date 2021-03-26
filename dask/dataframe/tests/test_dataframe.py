@@ -210,6 +210,45 @@ def test_attributes():
     pytest.raises(AttributeError, lambda: df.foo)
 
 
+def test_partition_sizes():
+    df = dd.from_pandas(
+        pd.DataFrame([{"i": f"{i}{i}"} for i in range(100)]), npartitions=3
+    )
+    assert df.partition_sizes == (34, 34, 32)
+    assert df.i.partition_sizes == (34, 34, 32)
+    assert df.i.map(len).partition_sizes == (34, 34, 32)
+    df["len"] = df.i.map(len)
+    assert df.partition_sizes == (34, 34, 32)
+    assert df["len"].partition_sizes == (34, 34, 32)
+    assert df["i"].partition_sizes == (34, 34, 32)
+    assert len(df.compute()) == 100
+    assert tuple(len(partition.compute()) for partition in df.partitions) == (
+        34,
+        34,
+        32,
+    )
+
+    for series in [
+        df.len + 2,
+        df.len - 2,
+        df.len * 2,
+        df.len / 2,
+        df.len % 2,
+        df.len % 2 == 0,
+    ]:
+        assert series.partition_sizes == (34, 34, 32)
+
+    # "dynamic" slice results in unknown `partition_sizes` (impossible to know "statically" how many elements are even
+    # vs. odd)
+    evens = df.len % 2 == 0
+    assert df[evens].partition_sizes is None
+    assert evens[evens].partition_sizes is None
+
+    a = np.array(range(1100)).reshape((100, 11))
+    d = da.from_array(a, chunks=(23, 4))
+    assert d.chunks == ((23, 23, 23, 23, 8), (4, 4, 3))
+
+
 def test_column_names():
     tm.assert_index_equal(d.columns, pd.Index(["a", "b"]))
     tm.assert_index_equal(d[["b", "a"]].columns, pd.Index(["b", "a"]))
@@ -1394,15 +1433,20 @@ def test_assign():
         index=pd.Index(list("abcdefgh")),
     )
     ddf = dd.from_pandas(df, npartitions=3)
+    assert ddf.known_divisions
     ddf_unknown = dd.from_pandas(df, npartitions=3, sort=False)
     assert not ddf_unknown.known_divisions
 
+    h = np.array(range(len(df)))
+    i = da.from_array(h)
     res = ddf.assign(
         c=1,
         d="string",
         e=ddf.a.sum(),
         f=ddf.a + ddf.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i,
         dt=pd.Timestamp(2018, 2, 13),
     )
     res_unknown = ddf_unknown.assign(
@@ -1411,6 +1455,8 @@ def test_assign():
         e=ddf_unknown.a.sum(),
         f=ddf_unknown.a + ddf_unknown.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i,
         dt=pd.Timestamp(2018, 2, 13),
     )
     sol = df.assign(
@@ -1419,6 +1465,8 @@ def test_assign():
         e=df.a.sum(),
         f=df.a + df.b,
         g=lambda x: x.a + x.b,
+        h=h,
+        i=i.compute(),
         dt=pd.Timestamp(2018, 2, 13),
     )
     assert_eq(res, sol)
@@ -2700,13 +2748,13 @@ def test_to_timestamp():
     assert_eq(
         ddf.to_timestamp(freq="M", how="s").compute(),
         df.to_timestamp(freq="M", how="s"),
-        **CHECK_FREQ
+        **CHECK_FREQ,
     )
     assert_eq(ddf.x.to_timestamp(), df.x.to_timestamp())
     assert_eq(
         ddf.x.to_timestamp(freq="M", how="s").compute(),
         df.x.to_timestamp(freq="M", how="s"),
-        **CHECK_FREQ
+        **CHECK_FREQ,
     )
 
 
@@ -3513,6 +3561,11 @@ def test_array_assignment():
 
     arr = np.array(np.random.normal(size=50))
     darr = da.from_array(arr, chunks=10)
+    ddf["z"] = darr
+    np.testing.assert_array_equal(ddf.z.values.compute(), darr.compute())
+
+    # If we don't know the partition_sizes, assigning an Array w/ a different number of partitions raises
+    ddf.partition_sizes = None
     msg = "Number of partitions do not match"
     with pytest.raises(ValueError, match=msg):
         ddf["z"] = darr
@@ -4241,11 +4294,22 @@ def test_mixed_dask_array_operations():
     df = pd.DataFrame({"x": [1, 2, 3]}, index=[4, 5, 6])
     ddf = dd.from_pandas(df, npartitions=2)
 
-    assert_eq(df.x + df.x.values, ddf.x + ddf.x.values)
-    assert_eq(df.x.values + df.x, ddf.x.values + ddf.x)
+    x = ddf.x
+    v = x.values
+    chunks = v.chunks
+    assert chunks == ((3,),)
+
+    l = df.x + df.x.values
+    r = x + v
+    assert_eq(l, r)
+    l = df.x.values + df.x
+    r = v + x
+    assert_eq(l, r)
 
     assert_eq(df.x + df.index.values, ddf.x + ddf.index.values)
-    assert_eq(df.index.values + df.x, ddf.index.values + ddf.x)
+    l = df.index.values + df.x
+    r = ddf.index.values + ddf.x
+    assert_eq(l, r)
 
     assert_eq(df.x + df.x.values.sum(), ddf.x + ddf.x.values.sum())
 
