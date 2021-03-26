@@ -423,7 +423,9 @@ class _Frame(DaskMethodsMixin, OperatorMethodMixin):
         This is strictly a shallow copy of the underlying computational graph.
         It does not affect the underlying data
         """
-        return new_dd_object(self.dask, self._name, self._meta, self.divisions)
+        return new_dd_object(
+            self.dask, self._name, self._meta, self.divisions, self.partition_sizes
+        )
 
     def __array__(self, dtype=None, **kwargs):
         self._computed = self.compute()
@@ -554,7 +556,13 @@ Dask Name: {name}, {task} tasks"""
             divisions = self.divisions[n : n + 2]
             layer = {(name, 0): (self._name, n)}
             graph = HighLevelGraph.from_collections(name, layer, dependencies=[self])
-            return new_dd_object(graph, name, self._meta, divisions)
+            return new_dd_object(
+                graph,
+                name,
+                self._meta,
+                divisions,
+                [self.partition_sizes[n]] if self.partition_sizes else None,
+            )
         else:
             msg = "n must be 0 <= n < {0}".format(self.npartitions)
             raise ValueError(msg)
@@ -1161,10 +1169,14 @@ Dask Name: {name}, {task} tasks"""
         divisions = [self.divisions[i] for _, i in new_keys] + [
             self.divisions[new_keys[-1][1] + 1]
         ]
+        if self.partition_sizes:
+            partition_sizes = [self.partition_sizes[i] for _, i in new_keys]
+        else:
+            partition_sizes = None
         dsk = {(name, i): tuple(key) for i, key in enumerate(new_keys)}
 
         graph = HighLevelGraph.from_collections(name, dsk, dependencies=[self])
-        return new_dd_object(graph, name, self._meta, divisions)
+        return new_dd_object(graph, name, self._meta, divisions, partition_sizes)
 
     @property
     def partitions(self):
@@ -1483,7 +1495,12 @@ Dask Name: {name}, {task} tasks"""
         -------
         """
         if lengths is True:
-            lengths = tuple(self.map_partitions(len, enforce_metadata=False).compute())
+            if self.partition_sizes:
+                lengths = self.partition_sizes
+            else:
+                lengths = tuple(
+                    self.map_partitions(len, enforce_metadata=False).compute()
+                )
 
         arr = self.values
 
@@ -5854,7 +5871,9 @@ def _rename_dask(df, names):
 
     dsk = partitionwise_graph(_rename, name, metadata, df)
     graph = HighLevelGraph.from_collections(name, dsk, dependencies=[df])
-    return new_dd_object(graph, name, metadata, df.divisions)
+    return new_dd_object(
+        graph, name, metadata, df.divisions, partition_sizes=df.partition_sizes
+    )
 
 
 def quantile(df, q, method="default"):
@@ -5922,9 +5941,11 @@ def quantile(df, q, method="default"):
             name,
             df._meta,
             [None, None],
+            partition_sizes=(0,),
         )
     else:
         new_divisions = [np.min(q), np.max(q)]
+        new_partition_sizes = (len(qs),)
 
     df = df.dropna()
 
@@ -5971,7 +5992,9 @@ def quantile(df, q, method="default"):
         }
     dsk = merge(val_dsk, merge_dsk)
     graph = HighLevelGraph.from_collections(name2, dsk, dependencies=[df])
-    return return_type(graph, name2, meta, new_divisions)
+    return return_type(
+        graph, name2, meta, new_divisions, partition_sizes=new_partition_sizes
+    )
 
 
 def cov_corr(df, min_periods=None, corr=False, scalar=False, split_every=False):
@@ -6490,9 +6513,27 @@ def _repartition_from_boundaries(df, new_partitions_boundaries, new_name):
         zip(new_partitions_boundaries, new_partitions_boundaries[1:])
     ):
         dsk[new_name, i] = (methods.concat, [(df._name, j) for j in range(start, end)])
+
+    partition_idx_starts = df.partition_idx_starts
+    if partition_idx_starts:
+        partition_idx_bounds = df.partition_idx_starts + (df._len,)
+        new_partition_idx_bounds = [
+            partition_idx_bounds[i] for i in new_partitions_boundaries
+        ]
+        partition_sizes = [
+            end - start
+            for start, end in zip(
+                new_partition_idx_bounds[:-1], new_partition_idx_bounds[1:]
+            )
+        ]
+    else:
+        partition_sizes = None
+
     divisions = [df.divisions[i] for i in new_partitions_boundaries]
     graph = HighLevelGraph.from_collections(new_name, dsk, dependencies=[df])
-    return new_dd_object(graph, new_name, df._meta, divisions)
+    return new_dd_object(
+        graph, new_name, df._meta, divisions, partition_sizes=partition_sizes
+    )
 
 
 def _split_partitions(df, nsplits, new_name):
@@ -6575,9 +6616,10 @@ def repartition(df, divisions=None, force=False):
         name = "repartition-dataframe-" + token
         from .utils import shard_df_on_index
 
-        dfs = shard_df_on_index(df, divisions[1:-1])
+        dfs = list(shard_df_on_index(df, divisions[1:-1]))
+        partition_sizes = [len(df) for df in dfs]
         dsk = dict(((name, i), df) for i, df in enumerate(dfs))
-        return new_dd_object(dsk, name, df, divisions)
+        return new_dd_object(dsk, name, df, divisions, partition_sizes=partition_sizes)
     raise ValueError("Data must be DataFrame or Series")
 
 
