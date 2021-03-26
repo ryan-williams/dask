@@ -225,12 +225,15 @@ def test_from_pandas_dataframe():
         dict(a=a, b=np.random.randn(len(a))),
         index=pd.date_range(start="20120101", periods=len(a)),
     )
+
     ddf = dd.from_pandas(df, 3)
     assert len(ddf.dask) == 3
-    assert len(ddf.divisions) == len(ddf.dask) + 1
-    assert isinstance(ddf.divisions[0], type(df.index[0]))
-    tm.assert_frame_equal(df, ddf.compute())
-    ddf = dd.from_pandas(df, chunksize=8)
+    assert ddf.divisions == tuple(
+        pd.to_datetime("201201%02d" % d) for d in (1, 9, 17, 22)
+    )
+    assert ddf.partition_sizes == (8, 8, 6)
+    assert_eq(ddf, df)
+
     msg = "Exactly one of npartitions and chunksize must be specified."
     with pytest.raises(ValueError) as err:
         dd.from_pandas(df, npartitions=2, chunksize=2)
@@ -238,10 +241,14 @@ def test_from_pandas_dataframe():
     with pytest.raises((ValueError, AssertionError)) as err:
         dd.from_pandas(df)
     assert msg in str(err.value)
+
+    ddf = dd.from_pandas(df, chunksize=8)
     assert len(ddf.dask) == 3
-    assert len(ddf.divisions) == len(ddf.dask) + 1
-    assert isinstance(ddf.divisions[0], type(df.index[0]))
-    tm.assert_frame_equal(df, ddf.compute())
+    assert ddf.divisions == tuple(
+        pd.to_datetime("201201%02d" % d) for d in (1, 9, 17, 22)
+    )
+    assert ddf.partition_sizes == (8, 8, 6)
+    assert_eq(ddf, df)
 
 
 def test_from_pandas_small():
@@ -374,8 +381,18 @@ def test_from_dask_array_index(as_frame):
     s = dd.from_pandas(pd.Series(range(10), index=list("abcdefghij")), npartitions=3)
     if as_frame:
         s = s.to_frame()
+        partition_sizes = [
+            None,  # TODO(partition-sizes): to_frame
+            None,  # TODO(partition-sizes): from_dask_array
+        ]
+    else:
+        partition_sizes = [
+            (4, 4, 2),
+            None,  # TODO(partition-sizes): from_dask_array
+        ]
+
     result = dd.from_dask_array(s.values, index=s.index)
-    assert_eq(s, result)  # TODO: from_dask-array partition_sizes
+    assert_eq(s, result, partition_sizes=partition_sizes)
 
 
 def test_from_dask_array_index_raises():

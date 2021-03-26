@@ -252,6 +252,7 @@ def test_rename_columns():
     ddf = dd.from_pandas(df, 2)
 
     ddf.columns = ["x", "y"]
+    assert ddf.partition_sizes == (4, 3)
     df.columns = ["x", "y"]
     tm.assert_index_equal(ddf.columns, pd.Index(["x", "y"]))
     tm.assert_index_equal(ddf._meta.columns, pd.Index(["x", "y"]))
@@ -268,6 +269,7 @@ def test_rename_columns():
 
     df.columns = ["x", "y"]
     ddf.columns = ["x", "y"]
+    assert ddf.partition_sizes == (2, 2)
     tm.assert_index_equal(ddf.columns, pd.Index(["x", "y"]))
     tm.assert_index_equal(ddf._meta.columns, pd.Index(["x", "y"]))
     assert_eq(ddf, df)
@@ -280,6 +282,7 @@ def test_rename_series():
 
     s.name = "renamed"
     ds.name = "renamed"
+    assert ds.partition_sizes == (4, 3)
     assert s.name == "renamed"
     assert_eq(ds, s)
 
@@ -952,7 +955,7 @@ def test_metadata_inference_single_partition_aligned_args():
         assert len(df) > 0
         return df
 
-    res = dd.map_partitions(check, ddf, ddf.x)
+    res = dd.map_partitions(check, ddf, ddf.x, preserve_partition_sizes=True)
     assert_eq(res, ddf)
 
 
@@ -1190,9 +1193,10 @@ def test_shape():
     assert_eq(dd.compute(result)[0], (len(full.a),))
 
     sh = dd.from_pandas(pd.DataFrame(index=[1, 2, 3]), npartitions=2).shape
-    assert (sh[0].compute(), sh[1]) == (3, 0)
-    sh = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1).shape
-    assert (sh[0].compute(), sh[1]) == (0, 2)
+    assert sh == (3, 0)
+    ddf = dd.from_pandas(pd.DataFrame({"a": [], "b": []}, index=[]), npartitions=1)
+    sh = ddf.shape
+    assert sh == (0, 2)
 
 
 def test_nbytes():
@@ -1756,8 +1760,8 @@ def test_repartition():
         sp = pd.concat(
             [compute_as_if_collection(dd.DataFrame, d.dask, k) for k in keys]
         )
-        assert_eq(orig, sp)
-        assert_eq(orig, d)
+        assert_eq(orig, sp, partition_sizes="verify")
+        assert_eq(orig, d, partition_sizes="verify")
 
     df = pd.DataFrame(
         {"x": [1, 2, 3, 4, 5, 6], "y": list("abdabd")}, index=[10, 20, 30, 40, 50, 60]
@@ -1766,7 +1770,7 @@ def test_repartition():
 
     b = a.repartition(divisions=[10, 20, 50, 60])
     assert b.divisions == (10, 20, 50, 60)
-    assert_eq(a, b)
+    assert_eq(a, b, partition_sizes=[(3, 3), None])
     assert_eq(compute_as_if_collection(dd.DataFrame, b.dask, (b._name, 0)), df.iloc[:1])
 
     for div in [
@@ -1907,7 +1911,23 @@ def test_repartition_npartitions(use_index, n, k, dtype, transform):
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
     b = a.repartition(k)
-    assert_eq(a, b)
+
+    partition_sizes_dict = {
+        (1, 1, True): (60,),
+        (1, 1, False): (60,),
+        (2, 2, True): (30, 30),
+        (2, 2, False): (30, 30),
+        (4, 4, True): (20, 10, 20, 10),
+        (4, 4, False): (15,) * 4,
+        (5, 5, True): (20, 10, 10, 10, 10),
+        (5, 5, False): (12,) * 5,
+    }
+    partition_sizes = partition_sizes_dict.get((n, k, use_index))
+
+    # skip left-side partition_sizes (which vary from case to case, and are set by from_pandas, which is not the focus
+    # of this test); right side is usually None except when n == k (that's the only case where repartition currently
+    # propagates partition_sizes, since it returns the input DataFrame)
+    assert_eq(a, b, partition_sizes=[False, partition_sizes])
     assert b.npartitions == k
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -1925,7 +1945,7 @@ def test_repartition_partition_size(use_index, n, partition_size, transform):
     df = transform(df)
     a = dd.from_pandas(df, npartitions=n, sort=use_index)
     b = a.repartition(partition_size=partition_size)
-    assert_eq(a, b, check_divisions=False)
+    assert_eq(a, b, check_divisions=False, partition_sizes=[False, None])
     assert np.alltrue(b.map_partitions(total_mem_usage, deep=True).compute() <= 1024)
     parts = dask.get(b.dask, b.__dask_keys__())
     assert all(map(len, parts))
@@ -1962,7 +1982,7 @@ def test_repartition_npartitions_numeric_edge_case():
     a = dd.from_pandas(df, npartitions=15)
     assert a.npartitions == 15
     b = a.repartition(npartitions=11)
-    assert_eq(a, b)
+    assert_eq(a, b, partition_sizes=[(7,) * 14 + (2,), None])
 
 
 def test_repartition_object_index():
@@ -4506,7 +4526,7 @@ def test_join_series():
     ddf = dd.from_pandas(df, npartitions=1)
     expected_df = dd.from_pandas(df.join(df["x"], lsuffix="_"), npartitions=1)
     actual_df = ddf.join(ddf["x"], lsuffix="_")
-    assert_eq(actual_df, expected_df)
+    assert_eq(actual_df, expected_df, partition_sizes=[None, (8,)])
 
 
 def test_dask_layers():
