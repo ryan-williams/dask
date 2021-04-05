@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -ex
+
+if ! pre-commit run --all-files; then
+    if git is-dirty; then
+	git commit -u --amend -a --no-edit
+	echo "Re-running…"
+	pre-commit run --all-files
+    else
+	exit 1
+    fi
+fi
